@@ -282,6 +282,7 @@ function updateGemGrab(){
     endGame(totalGemsBlue()>=totalGemsRed());return;
   }
   // Gem mine: spawn gem every 7s if <15 on map and total <29
+  if(!GEM||!BUL)return;
   const onMap=GEM.filter(g=>!g.collected).length;
   if(onMap<15&&(totalGemsBlue()+totalGemsRed()+onMap)<GG_MAX_GEMS){
     GG_MINE_TIMER-=DT;
@@ -1514,6 +1515,7 @@ function updatePlayer(){
 
 /* ═══ UPDATE ENEMIES ═══ */
 function updateEnemies(){
+  if(!ENM||!Array.isArray(ENM))return;
   let alive=0;
   for(const e of ENM){
     if(e.dead){
@@ -1621,7 +1623,8 @@ function updateEnemies(){
 
 /* ═══ BULLETS ═══ */
 function fireBul(x,y,angle,spd,dmg,color,glow,owner,r,sc=1,life=1.8,ignWalls=false,isRocket=false,heals=false,sniper=false){
-  BUL.push({x,y,vx:Math.cos(angle)*spd,vy:Math.sin(angle)*spd,dmg,color,glow,owner,r,sc,life,ignWalls,isRocket,heals,sniper,trail:[]});
+  const _b={x,y,vx:Math.cos(angle)*spd,vy:Math.sin(angle)*spd,dmg,color,glow,owner,r,sc,life,ignWalls,isRocket,heals,sniper,trail:[]};
+  BUL.push(_b);return _b;
 }
 function updateBullets(){
   for(let i=BUL.length-1;i>=0;i--){
@@ -1661,7 +1664,7 @@ function updateBullets(){
           if(ae.dead||ae.invT>0)continue;
           // In showdown: hit any other entity; in team modes: only hit team 0 allies
           if(MODE!=="showdown"&&ae.team!==0)continue;
-          if(MODE==="showdown"&&ae===ENM.find(x=>x.color===b.color))continue; // no self-hit
+          if(MODE==="showdown"&&b.ownerRef&&ae===b.ownerRef)continue; // no self-hit
           if(dst(b,ae)<ae.r+b.r){
             ae.hp-=b.dmg;ae.invT=.15;ae.flashT=.07;
             spark(ae.x,ae.y,"#FF6644");spawnDmg(ae.x,ae.y-28,`-${Math.round(b.dmg)}`,"#FF9955");
@@ -2394,7 +2397,14 @@ function drawCreateScreen(){
   // ── CENTER: Preview ─────────────────────────────────────────────
   const cx=250,cw=W-510;
   X.fillStyle="rgba(0,0,0,.35)";rr(cx,60,cw,490,12);X.fill();
-  const fakeB2={x:cx+cw/2,y:290,r:42,color:CREATE.color,dark:CREATE.dark,body:CREATE.color,angle:Math.sin(CREATE_PREVIEW_T)*0.4,invT:0,walkT:CREATE_PREVIEW_T*1.4,type:"agile",dead:false,deathT:0,flashT:0,hidden:false,team:0};
+  const fakeB2={x:cx+cw/2,y:290,r:42,
+    color:CREATE.color,dark:CREATE.dark,body:CREATE.color,
+    name:CREATE.name,
+    hp:CREATE.hp,maxHp:CREATE.hp,
+    ammo:CREATE.ammoMax,maxAmmo:CREATE.ammoMax,
+    sup:0,supMax:100,shield:0,stealth:0,spdBoost:0,
+    angle:Math.sin(CREATE_PREVIEW_T)*0.4,invT:0,walkT:CREATE_PREVIEW_T*1.4,
+    type:"agile",dead:false,deathT:0,flashT:0,hidden:false,team:0};
   drawBrawler(fakeB2,false);
   gl(CREATE.color,12);X.fillStyle=CREATE.color;X.font='bold 18px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText(CREATE.name,cx+cw/2,360);ng();
   const R3=RARITY[CREATE.rarity];if(R3){gl(R3.glow,5);X.fillStyle=R3.color;X.font='bold 10px "Lilita One"';X.fillText("★ "+R3.label,cx+cw/2,378);ng();}
@@ -2620,6 +2630,7 @@ function drawHUD(){
   X.fillStyle="rgba(160,160,190,.4)";X.font=`bold 9px "Lilita One"`;X.textAlign="left";X.textBaseline="middle";
   X.fillText(MODE==="knockout"?"KNOCKOUT":t("wave",WAVE+1,WAVES.length),wX,wY);
   }
+  if(!ENM||!Array.isArray(ENM))return;
   const alive=ENM.filter(e=>!e.dead).length;
   X.fillStyle=alive?"#FF8888":"#88FF88";X.font=`bold 16px "Lilita One"`;
   X.fillText(t("remaining",alive),wX,wY+16);
@@ -2667,7 +2678,7 @@ function drawHUD(){
     X.fillText(`${PL.name} besiegt ${kf.name}`,kfX+24,kfY+i*26+11);
     X.globalAlpha=1;
   }
-  KFEED=KFEED.filter(k=>k.t>0);
+  if(Array.isArray(KFEED))KFEED=KFEED.filter(k=>k.t>0);
 
   // Gear icon (top right, in-game)
   X.fillStyle="rgba(0,0,0,.5)";X.beginPath();X.arc(W-24,24,18,0,6.28);X.fill();
@@ -3121,6 +3132,13 @@ function render(){
   if(STATE==="win")drawEnd(true);
   if(STATE==="lose")drawEnd(false);
 }
-function loop(ts){DT=Math.min((ts-LT)/1000,.05);LT=ts;update();render();requestAnimationFrame(loop)}
+function loop(ts){
+  DT=Math.min((ts-LT)/1000,.05);LT=ts;
+  try{update()}catch(err){console.error("UPDATE CRASH:",err.message,"\nStack:",err.stack);if(!window._errShown){window._errShown=1;alert("Update error: "+err.message)}}
+  try{render()}catch(err){console.error("RENDER CRASH:",err.message,"\nStack:",err.stack);if(!window._errShown){window._errShown=1;alert("Render error: "+err.message)}}
+  requestAnimationFrame(loop)
+}
 buildCache();requestAnimationFrame(loop);
-</script></body></html>
+</script>
+</body>
+</html>
