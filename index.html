@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Brawl Rush</title>
+<!--Das ist die echte in BS verwendete Font-->
 <link href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -567,8 +568,9 @@ function claimBPReward(tier,isPremiumRow){
   const alreadyClaimed=SAVE.brawlPassClaimed.includes(claimKey)||SAVE.brawlPassClaimed.includes(tier)||SAVE.brawlPassClaimed.includes(String(tier));
   if(alreadyClaimed)return;
   if(rw.premium&&!SAVE.brawlPassPremium)return;
-  // Tier 1 is always claimable; others need brawlPassTier >= tier
-  if(tier>1&&(SAVE.brawlPassTier||1)<tier)return;
+  // All tiers up to and including current brawlPassTier are claimable
+  const currentTier=SAVE.brawlPassTier||1;
+  if(tier>currentTier)return;
   SAVE.brawlPassClaimed.push(claimKey);
   let toast='';
   if(rw.type==='coins'){SAVE.coins+=rw.value;toast=`🪙 +${rw.value}`}
@@ -1335,21 +1337,47 @@ let SEL=0;
 /* CUSTOM BRAWLER SYSTEM — max 3 slots, saved in localStorage */
 const MAX_CUSTOM=3,MAX_BRAWLERS=32;
 function customBDEntry(cb){
-  return{key:cb.key,name:cb.name,rarity:cb.rarity||"EPIC",color:cb.color,dark:cb.dark||cb.color,body:cb.color,
-    hp:cb.hp||3000,spd:cb.spd||200,ammoMax:3,ammoR:1.4,sCool:.7,wType:cb.wType||"rifle",dmg:cb.dmg||600,rLife:1.5,
-    sHp:Math.round((cb.hp||3000)/2000),sSp:Math.round((cb.spd||200)/60),sDm:Math.round((cb.dmg||600)/600),sRg:3,
-    desc:"Dein eigener Brawler!",superDesc:cb.superDesc||"Eigene Super",isCustom:true};
+  // Recover color from hue/sat/bri if direct color missing
+  let col=cb.color||"#FF8800";
+  let dark=cb.dark||col;
+  if((!col||col==="#FF8800")&&cb.hue!==undefined){
+    col=hslToHex(cb.hue,cb.sat||60,cb.bri||50);
+    dark=hslToHex(cb.hue,cb.sat||60,Math.max(10,(cb.bri||50)-22));
+  }
+  return{
+    key:cb.key, name:cb.name||"Custom", rarity:cb.rarity||"EPIC",
+    color:col, dark:dark, body:col,
+    hp:cb.hp||3000, spd:cb.spd||200, ammoMax:3, ammoR:1.4, sCool:.7,
+    wType:cb.wType||"rifle", dmg:cb.dmg||600, rLife:1.5,
+    sHp:Math.max(1,Math.round((cb.hp||3000)/2000)),
+    sSp:Math.max(1,Math.round((cb.spd||200)/60)),
+    sDm:Math.max(1,Math.round((cb.dmg||600)/600)), sRg:3,
+    desc:"Dein eigener Brawler!",
+    superDesc:cb.superDesc||"Eigene Super",
+    isCustom:true,
+    // Preserve original create params for re-editing
+    hue:cb.hue, sat:cb.sat, bri:cb.bri,
+  };
 }
 function loadCustomBrawlers(){
   if(!SAVE.customBrawlers||!Array.isArray(SAVE.customBrawlers))SAVE.customBrawlers=[];
+  // Filter only valid entries
   SAVE.customBrawlers=SAVE.customBrawlers.filter(cb=>cb&&cb.key&&cb.name);
   SAVE.customBrawlers.forEach(cb=>{
-    const entry=customBDEntry(cb),idx=BD.findIndex(b=>b.key===cb.key);
-    if(idx>=0)BD[idx]=entry;else if(BD.length<MAX_BRAWLERS)BD.push(entry);
+    const entry=customBDEntry(cb);
+    const idx=BD.findIndex(b=>b.key===cb.key);
+    if(idx>=0)BD[idx]=entry;
+    else if(BD.length<MAX_BRAWLERS)BD.push(entry);
     if(!SAVE.unlocked.includes(cb.key))SAVE.unlocked.push(cb.key);
   });
+  // Remove stale old CUSTOM key if not in customBrawlers
   const oi=BD.findIndex(b=>b.key==="CUSTOM");
-  if(oi>=0&&!SAVE.customBrawlers.find(cb=>cb.key==="CUSTOM")){BD.splice(oi,1);SAVE.unlocked=SAVE.unlocked.filter(k=>k!=="CUSTOM");}
+  if(oi>=0&&!SAVE.customBrawlers.find(cb=>cb.key==="CUSTOM")){
+    BD.splice(oi,1);
+    SAVE.unlocked=SAVE.unlocked.filter(k=>k!=="CUSTOM");
+  }
+  // Clamp SEL to valid range
+  if(typeof SEL!=="undefined"&&SEL>=BD.length)SEL=Math.max(0,BD.length-1);
 }
 function saveCreatedBrawlerToSlot(bd){
   if(!SAVE.customBrawlers)SAVE.customBrawlers=[];
@@ -1518,9 +1546,11 @@ C.addEventListener("click",e=>{
 });
 
 addEventListener("keydown",e=>{
+  // DevTools intercepts all keystrokes when open
   K[e.key.toLowerCase()]=true;
   if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()))e.preventDefault();
   if(e.key.toLowerCase()==="e")Ekey=true;
+
   if(STATE==="select"){
     if((STATE==="home"||STATE==="select")&&e.key==="ArrowRight"&&SEL<BD.length-1){SEL++;snd("select")}
     if((STATE==="home"||STATE==="select")&&e.key==="ArrowLeft"&&SEL>0){SEL--;snd("select")}
@@ -1633,7 +1663,7 @@ function handleHomeTap(x,y){
   }
   // Brawl Pass button (bottom left)
   if(HOME._bpBtn&&x>=HOME._bpBtn.x&&x<=HOME._bpBtn.x+HOME._bpBtn.w&&y>=HOME._bpBtn.y&&y<=HOME._bpBtn.y+HOME._bpBtn.h){
-    STATE="upgrade";UPGRADE_TAB=3;snd("select");return;
+    STATE="upgrade";UPGRADE_TAB=3;drawUpgradeScreen._bpVisStart=undefined;snd("select");return;
   }
   // PLAY button → start game directly
   if(HOME._plBtn&&x>=HOME._plBtn.x&&x<=HOME._plBtn.x+HOME._plBtn.w&&y>=HOME._plBtn.y&&y<=HOME._plBtn.y+HOME._plBtn.h){
@@ -1803,49 +1833,13 @@ function drawHomeScreen(){
     const spX=W/2, spY=H*.46;
 
     // Ground shadow ellipse
-    X.fillStyle="rgba(0,0,0,.2)";X.beginPath();X.ellipse(spX,spY+110,90,22,0,0,6.28);X.fill();
+    X.fillStyle="rgba(0,0,0,.2)";X.beginPath();X.ellipse(spX,spY+110,95,24,0,0,6.28);X.fill();
 
-    // Brawler (large version of the mini-character)
-    const sR=100, sw=T*1.2, sBob=Math.abs(Math.sin(sw*6))*4;
-    const sS=sR/21;
-    const lW=5*sS,lH=12*sS,lSp=5*sS;
-    const aW=4*sS,aH=10*sS;
-    const bW=14*sS,bH=14*sS,bY2=-11*sS;
-    const hR=8*sS,hY2=bY2-hR+2*sS;
-    const aY2=bY2+2*sS;
-    const lS=Math.sin(sw*6)*0.28,aS=Math.sin(sw*6)*0.32;
-
-    X.save();X.translate(spX,spY+sBob);
-    // Legs
-    X.fillStyle=lc(bd.dark,-8);
-    X.save();X.translate(-lSp,2*sS);X.rotate(lS);X.beginPath();X.ellipse(0,lH/2,lW/2,lH/2,0,0,6.28);X.fill();X.restore();
-    X.save();X.translate(lSp,2*sS);X.rotate(-lS);X.beginPath();X.ellipse(0,lH/2,lW/2,lH/2,0,0,6.28);X.fill();X.restore();
-    // Back arm
-    X.save();X.translate(bW/2-2*sS,aY2);X.rotate(-aS-.18);X.fillStyle=lc(bd.color,10);X.beginPath();X.ellipse(0,aH/2,aW/2,aH/2,0,0,6.28);X.fill();X.restore();
-    // Body
-    gl(bd.color,20);X.fillStyle=bd.color;X.fillRect(-bW/2,bY2,bW,bH);ng();
-    X.fillStyle="rgba(255,255,255,.2)";X.fillRect(-bW/2+1,bY2+1,bW*.55,bH*.3);
-    X.fillStyle=bd.dark;X.fillRect(-bW/2,2*sS-2,bW,3*sS);
-    // Front arm
-    X.save();X.translate(-bW/2+2*sS,aY2);X.rotate(aS+.18);X.fillStyle=lc(bd.color,10);X.beginPath();X.ellipse(0,aH/2,aW/2,aH/2,0,0,6.28);X.fill();X.restore();
-    // Head
-    gl(bd.color,16);X.fillStyle=bd.color;X.beginPath();X.arc(0,hY2,hR,0,6.28);X.fill();ng();
-    X.fillStyle="rgba(255,210,160,.45)";X.beginPath();X.arc(0,hY2+hR*.1,hR*.82,0,Math.PI);X.closePath();X.fill();
-    X.fillStyle="rgba(255,255,255,.18)";X.beginPath();X.ellipse(-hR*.2,hY2-hR*.28,hR*.38,hR*.26,-.4,0,6.28);X.fill();
-    // Hat
-    X.fillStyle=bd.dark;X.beginPath();X.ellipse(0,hY2-hR+1,hR*.9,hR*.25,0,Math.PI,0);X.fill();
-    X.fillRect(-hR*.9,hY2-hR-hR*.42,hR*1.8,hR*.48);
-    // Eyes
-    const eY2=hY2-hR*.06,eSpX=hR*.36,eR2=hR*.2;
-    X.fillStyle="#FAFFF8";X.beginPath();X.ellipse(-eSpX,eY2,eR2,eR2*.82,0,0,6.28);X.fill();
-    X.beginPath();X.ellipse(eSpX,eY2,eR2,eR2*.82,0,0,6.28);X.fill();
-    X.fillStyle="#1A3A7A";X.beginPath();X.arc(-eSpX+2,eY2+1,eR2*.52,0,6.28);X.fill();
-    X.beginPath();X.arc(eSpX+2,eY2+1,eR2*.52,0,6.28);X.fill();
-    X.fillStyle="rgba(255,255,255,.88)";X.beginPath();X.arc(-eSpX,eY2-eR2*.18,eR2*.28,0,6.28);X.fill();
-    X.beginPath();X.arc(eSpX,eY2-eR2*.18,eR2*.28,0,6.28);X.fill();
-    X.strokeStyle="rgba(0,0,0,.7)";X.lineWidth=1.8*sS;X.lineCap="round";
-    X.beginPath();X.arc(0,hY2+hR*.3,hR*.2,.12,Math.PI-.12);X.stroke();X.lineCap="butt";
-    X.restore();
+    // Big brawler portrait — animated bob
+    const sBob=Math.abs(Math.sin(T*1.2*6))*5;
+    gl(bd.color,30);
+    drawBrawlerImage(bd,spX,spY+sBob,110);
+    ng();
 
     // ── Brawler info badge (rank + trophies + power) ──
     const bdgW=240,bdgH=46,bdgX=spX-bdgW/2,bdgY=spY-148;
@@ -2749,6 +2743,330 @@ function svgIconShadow(name,cx,cy,sz,col){
 function lc(hex,a,alpha){const n=parseInt(hex.slice(1),16);const r=Math.min(255,((n>>16)&255)+a),g=Math.min(255,((n>>8)&255)+a),b=Math.min(255,(n&255)+a);return alpha!==undefined?`rgba(${r},${g},${b},${alpha})`:`rgb(${r},${g},${b})`}
 function gl(col,b){X.shadowColor=col;X.shadowBlur=b*DPR}function ng(){X.shadowBlur=0}
 
+/* ═══ BRAWLER PORTRAIT ═══ */
+// Draws a rich brawler portrait centered at (cx,cy) with radius r
+// Each brawler has unique features based on their key
+function drawBrawlerPortrait(b,cx,cy,r){
+  const k=b.key,col=b.color,dark=b.dark;
+  const s=r/28; // scale unit
+  X.save();X.translate(cx,cy);
+
+  // ── Body shadow ──
+  X.fillStyle="rgba(0,0,0,.25)";X.beginPath();X.ellipse(0,r*.7,r*.6,r*.18,0,0,6.28);X.fill();
+
+  // ── Body ──
+  const bodyGr=X.createRadialGradient(-r*.15,-r*.1,r*.1,0,0,r*.72);
+  bodyGr.addColorStop(0,lc(col,55));bodyGr.addColorStop(.6,col);bodyGr.addColorStop(1,dark);
+  X.fillStyle=bodyGr;
+
+  // Body shape varies by weapon type
+  const wt=b.wType||"rifle";
+  if(wt==="hammer"||wt==="blades"){
+    // Stocky / wide body
+    X.beginPath();X.ellipse(0,r*.2,r*.38,r*.48,0,0,6.28);X.fill();
+  } else if(wt==="sniper"){
+    // Tall slim body
+    X.beginPath();X.ellipse(0,r*.22,r*.28,r*.5,0,0,6.28);X.fill();
+  } else {
+    // Standard body
+    X.beginPath();X.ellipse(0,r*.2,r*.32,r*.46,0,0,6.28);X.fill();
+  }
+
+  // Clothing detail stripe
+  X.fillStyle=ca(dark,"CC");
+  X.beginPath();X.ellipse(0,r*.32,r*.28,r*.12,0,0,6.28);X.fill();
+  // Shine on body
+  X.fillStyle="rgba(255,255,255,.18)";
+  X.beginPath();X.ellipse(-r*.08,-r*.05,r*.18,r*.1,-.3,0,6.28);X.fill();
+
+  // ── Arms ──
+  X.fillStyle=lc(col,20);
+  // Left arm
+  X.save();X.translate(-r*.35,r*.05);X.rotate(-.4);
+  X.beginPath();X.ellipse(0,r*.22,r*.1,r*.22,0,0,6.28);X.fill();X.restore();
+  // Right arm (holding weapon)
+  X.save();X.translate(r*.35,r*.02);X.rotate(.35);
+  X.beginPath();X.ellipse(0,r*.22,r*.1,r*.22,0,0,6.28);X.fill();X.restore();
+
+  // ── Weapon visual ──
+  X.save();X.translate(r*.42,r*.12);
+  if(wt==="shotgun"){
+    X.fillStyle=dark;rr(-r*.06,-r*.04,r*.35,r*.08,r*.03*s);X.fill();
+    X.fillStyle=lc(dark,30);rr(-r*.06,-r*.04,r*.12,r*.08,r*.02*s);X.fill();
+  } else if(wt==="rifle"){
+    X.fillStyle=dark;rr(-r*.04,-r*.03,r*.38,r*.06,r*.02*s);X.fill();
+  } else if(wt==="sniper"){
+    X.fillStyle=dark;rr(-r*.03,-r*.025,r*.46,r*.05,r*.02*s);X.fill();
+    X.fillStyle=lc(dark,40);rr(r*.28,-r*.035,r*.08,r*.07,r*.02*s);X.fill();
+  } else if(wt==="hammer"){
+    X.fillStyle=dark;rr(-r*.04,-r*.14,r*.08,r*.28,r*.03*s);X.fill();
+    X.fillStyle=lc(dark,20);rr(-r*.12,-r*.16,r*.28,r*.1,r*.03*s);X.fill();
+  } else if(wt==="rocket"){
+    X.fillStyle=dark;rr(-r*.04,-r*.04,r*.3,r*.08,r*.04*s);X.fill();
+    X.fillStyle="#FF8800";rr(r*.22,-r*.06,r*.08,r*.12,r*.03*s);X.fill();
+  } else if(wt==="thrower"){
+    X.fillStyle=dark;rr(-r*.04,-r*.04,r*.22,r*.08,r*.04*s);X.fill();
+    X.fillStyle="#44AAFF";X.beginPath();X.arc(r*.26,0,r*.08,0,6.28);X.fill();
+  } else if(wt==="blades"){
+    for(let i=-1;i<=1;i+=2){X.save();X.rotate(i*.4);X.fillStyle=lc(dark,30);
+      rr(r*.05,-r*.15,r*.08,r*.32,r*.03*s);X.fill();X.restore();}
+  } else if(wt==="healer"){
+    X.fillStyle="#44FF88";X.beginPath();X.arc(r*.18,0,r*.1,0,6.28);X.fill();
+    X.fillStyle="#FFF";X.fillRect(r*.14,-r*.025,r*.08,r*.05);X.fillRect(r*.155,-r*.04,r*.05,r*.08);
+  }
+  X.restore();
+
+  // ── Head ──
+  const headY=-r*.38;
+  const headR=r*(wt==="hammer"?0.31:wt==="sniper"?0.26:0.29);
+  const headGr=X.createRadialGradient(-headR*.25,headY-headR*.2,headR*.1,0,headY,headR*1.1);
+  headGr.addColorStop(0,"rgba(255,210,160,.9)");headGr.addColorStop(.7,"rgba(220,170,120,.9)");
+  headGr.addColorStop(1,ca(dark,"88"));
+  gl(dark,headR*.6);
+  X.fillStyle=headGr;X.beginPath();X.arc(0,headY,headR,0,6.28);X.fill();ng();
+
+  // ── Unique hair / hat per brawler ──
+  const hairCol=lc(col,30);
+  switch(k){
+    case"SHELLY":
+      // Cowboy hat
+      X.fillStyle=dark;X.beginPath();X.ellipse(0,headY-headR*.5,headR*1.3,headR*.3,0,0,6.28);X.fill();
+      X.fillRect(-headR*.6,headY-headR*1.3,headR*1.2,headR*.85);
+      X.fillStyle=lc(dark,30);X.beginPath();X.ellipse(0,headY-headR*1.35,headR*.55,headR*.2,0,0,6.28);X.fill();
+      // Hat band
+      X.strokeStyle="#FF8800";X.lineWidth=2*s;X.beginPath();X.moveTo(-headR*.6,headY-headR*.48);X.lineTo(headR*.6,headY-headR*.48);X.stroke();
+      break;
+    case"COLT":
+      // Slicked back hair, sheriff star
+      X.fillStyle=hairCol;X.beginPath();X.ellipse(0,headY-headR*.7,headR*.7,headR*.45,0,0,Math.PI);X.fill();
+      X.fillStyle="#FFD700";X.font=`bold ${r*.22}px serif`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText("★",headR*.55,headY-headR*.1);
+      break;
+    case"BULL":
+      // Bull horns
+      X.fillStyle=lc(dark,40);
+      for(let i=-1;i<=1;i+=2){X.save();X.translate(i*headR*.7,headY-headR*.4);X.rotate(i*-.5);
+        X.beginPath();X.ellipse(0,0,headR*.14,headR*.4,0,0,6.28);X.fill();X.restore();}
+      // Bald head shine
+      X.fillStyle="rgba(255,255,255,.15)";X.beginPath();X.ellipse(-headR*.2,headY-headR*.4,headR*.2,headR*.12,-.3,0,6.28);X.fill();
+      break;
+    case"BROCK":
+      // Headband + spiky hair
+      X.fillStyle="#FF4400";X.fillRect(-headR*.7,headY-headR*.55,headR*1.4,headR*.2);
+      X.fillStyle=hairCol;
+      for(let i=-2;i<=2;i++){X.beginPath();X.moveTo(i*headR*.22,headY-headR*.55);
+        X.lineTo(i*headR*.22-headR*.1,headY-headR*1.05);X.lineTo(i*headR*.22+headR*.1,headY-headR*1.05);X.closePath();X.fill();}
+      break;
+    case"DYNA":
+      // Round hat with fuse
+      X.fillStyle=dark;X.beginPath();X.arc(0,headY,headR*1.1,Math.PI,0);X.fill();
+      X.fillStyle="#FFD700";X.beginPath();X.moveTo(headR*.5,headY-headR*.1);
+        X.quadraticCurveTo(headR*.9,headY-headR*.6,headR*.6,headY-headR*.9);X.lineWidth=3*s;X.strokeStyle="#FFD700";X.stroke();
+      // Fuse spark
+      gl("#FF8800",6);X.fillStyle="#FF8800";X.beginPath();X.arc(headR*.6,headY-headR*.9,headR*.08,0,6.28);X.fill();ng();
+      break;
+    case"PIPER":
+      // Sun hat
+      X.fillStyle="#FFD700";X.beginPath();X.ellipse(0,headY-headR*.3,headR*1.4,headR*.35,0,0,6.28);X.fill();
+      X.fillStyle=lc("#FFD700",30);X.beginPath();X.arc(0,headY-headR*.7,headR*.7,Math.PI,0);X.fill();
+      // Bow
+      X.fillStyle="#FF4488";X.beginPath();X.ellipse(-headR*.2,headY-headR*1.1,headR*.2,headR*.1,-.5,0,6.28);X.fill();
+      X.beginPath();X.ellipse(headR*.2,headY-headR*1.1,headR*.2,headR*.1,.5,0,6.28);X.fill();
+      break;
+    case"POCO":
+      // Musical hat + guitar pick earring
+      X.fillStyle=lc(col,40);X.beginPath();X.ellipse(0,headY-headR*.35,headR*1.1,headR*.28,0,0,6.28);X.fill();
+      X.fillRect(-headR*.55,headY-headR*1.1,headR*1.1,headR*.8);
+      // Musical notes
+      X.fillStyle="#FFF";X.font=`${r*.2}px serif`;X.textAlign="center";X.fillText("♪",headR*.5,headY-headR*.1);
+      break;
+    case"ROSA":
+      // Leaf crown
+      X.fillStyle="#228822";
+      for(let i=0;i<5;i++){const a=-Math.PI/2+i*Math.PI*.4-Math.PI*.4;
+        X.save();X.translate(Math.cos(a)*headR*.7,headY+Math.sin(a)*headR*.7);X.rotate(a+Math.PI/2);
+        X.beginPath();X.ellipse(0,-headR*.18,headR*.1,headR*.22,0,0,6.28);X.fill();X.restore();}
+      break;
+    case"LEON":
+      // Chameleon hood + green skin tinge
+      X.fillStyle=ca("#44CC88","88");X.beginPath();X.arc(0,headY,headR*1.05,Math.PI*.8,Math.PI*.2);X.fill();
+      X.fillStyle="#44CC88";X.beginPath();X.ellipse(0,headY-headR*.85,headR*.5,headR*.3,0,0,6.28);X.fill();
+      break;
+    case"SPIKE":
+      // Cactus head spikes
+      X.fillStyle="#44AA33";
+      for(let i=0;i<6;i++){const a=-Math.PI*.6+i*Math.PI*.24;
+        X.save();X.translate(Math.cos(a)*headR*.82,headY+Math.sin(a)*headR*.82);X.rotate(a);
+        X.beginPath();X.moveTo(-headR*.08,0);X.lineTo(0,-headR*.32);X.lineTo(headR*.08,0);X.closePath();X.fill();X.restore();}
+      break;
+    case"TARA":
+      // Tarot card tiara + purple veil
+      X.fillStyle="#6622AA";X.beginPath();X.ellipse(0,headY-headR*.85,headR*.9,headR*.2,0,0,6.28);X.fill();
+      X.fillStyle=ca("#AA44FF","88");X.beginPath();X.ellipse(0,headY,headR*.6,headR*.9,0,0,Math.PI);X.fill();
+      gl("#AA44FF",8);X.fillStyle="#FFD700";X.font=`bold ${r*.22}px serif`;X.textAlign="center";
+      X.fillText("✦",0,headY-headR*.82);ng();
+      break;
+    case"FRANK":
+      // Big flat hair + stitches
+      X.fillStyle=lc(col,20);X.fillRect(-headR*.75,headY-headR*1.1,headR*1.5,headR*.8);
+      X.strokeStyle="#222";X.lineWidth=2*s;
+      X.beginPath();X.moveTo(-headR*.3,headY-headR*.1);X.lineTo(headR*.3,headY-headR*.1);X.stroke();
+      break;
+    case"MORTIS":
+      // Slicked hair + vampire collar
+      X.fillStyle="#110022";X.beginPath();X.ellipse(0,headY-headR*.7,headR*.65,headR*.4,0,0,Math.PI);X.fill();
+      X.fillStyle="#FFF";
+      X.beginPath();X.moveTo(-headR*.7,headY+headR*.4);X.lineTo(-headR*.5,headY+headR*.8);
+        X.lineTo(0,headY+headR*.5);X.lineTo(headR*.5,headY+headR*.8);X.lineTo(headR*.7,headY+headR*.4);X.closePath();X.fill();
+      break;
+    case"JACKY":
+      // Hard hat + safety vest
+      X.fillStyle="#FFAA00";X.beginPath();X.arc(0,headY,headR*1.05,Math.PI*.7,Math.PI*.3);X.closePath();X.fill();
+      X.fillStyle="#FF8800";rr(-headR*.7,headY-headR*.2,headR*1.4,headR*.18,3*s);X.fill();
+      break;
+    case"EMZ":
+      // Big wavy hair
+      X.fillStyle="#FF44AA";
+      for(let i=-2;i<=2;i++){X.beginPath();X.arc(i*headR*.3,headY-headR*.9,headR*.35,0,6.28);X.fill();}
+      break;
+    case"CROW":
+      // Feather mohawk
+      X.fillStyle="#1A331A";
+      for(let i=-1;i<=1;i++){X.save();X.translate(i*headR*.25,headY-headR*.5);
+        X.beginPath();X.ellipse(0,-headR*.3,headR*.1,headR*.38,i*.2,0,6.28);X.fill();X.restore();}
+      break;
+    case"SANDY":
+      // Sand crown effect
+      X.fillStyle=ca("#FFEE44","AA");
+      for(let i=0;i<8;i++){const a=i/8*6.28;X.beginPath();X.arc(Math.cos(a)*headR*.82,headY+Math.sin(a)*headR*.82,headR*.12,0,6.28);X.fill();}
+      break;
+    case"LILY":
+      // Long flowing hair
+      X.fillStyle="#AA44BB";X.beginPath();X.ellipse(-headR*.15,headY,headR*.45,headR*1.1,-.15,0,6.28);X.fill();
+      X.fillStyle=lc("#AA44BB",30);X.beginPath();X.ellipse(0,headY-headR*.7,headR*.7,headR*.4,0,0,Math.PI);X.fill();
+      break;
+    case"BIBI":
+      // Baseball cap
+      X.fillStyle="#2244AA";X.beginPath();X.arc(0,headY,headR*1.05,Math.PI*.85,Math.PI*.15);X.closePath();X.fill();
+      X.fillStyle=lc("#2244AA",30);rr(-headR*.55,headY-headR*.35,headR*1.1,headR*.22,4*s);X.fill();
+      // Cap brim
+      X.fillStyle="#1133AA";X.beginPath();X.ellipse(headR*.6,headY-headR*.06,headR*.35,headR*.12,-.1,0,6.28);X.fill();
+      break;
+    case"PAM":
+      // Engineer goggles + bandana
+      X.fillStyle="#8B4513";rr(-headR*.7,headY-headR*.1,headR*1.4,headR*.15,3*s);X.fill();
+      X.fillStyle="#FFAA00";X.beginPath();X.arc(-headR*.28,headY-headR*.08,headR*.22,0,6.28);X.fill();
+      X.beginPath();X.arc(headR*.28,headY-headR*.08,headR*.22,0,6.28);X.fill();
+      X.strokeStyle="#555";X.lineWidth=2*s;X.beginPath();X.moveTo(-headR*.06,headY-headR*.08);X.lineTo(headR*.06,headY-headR*.08);X.stroke();
+      break;
+    case"TICK":
+      // Antenna + round eyes
+      X.fillStyle="#888800";rr(-headR*.04,headY-headR*1.2,headR*.08,headR*.45,4*s);X.fill();
+      gl("#FF4400",8);X.fillStyle="#FF4400";X.beginPath();X.arc(0,headY-headR*1.2,headR*.14,0,6.28);X.fill();ng();
+      break;
+    case"GENE":
+      // Floating wizard hat + magic beard
+      X.fillStyle="#440088";X.beginPath();X.moveTo(0,headY-headR*1.3);X.lineTo(-headR*.5,headY-headR*.55);X.lineTo(headR*.5,headY-headR*.55);X.closePath();X.fill();
+      X.fillStyle=ca("#AA88FF","AA");X.beginPath();X.ellipse(0,headY+headR*.5,headR*.3,headR*.45,0,0,Math.PI);X.fill();
+      break;
+    case"MAX":
+      // High ponytail + cap
+      X.fillStyle="#FF3399";X.beginPath();X.arc(0,headY,headR*1.05,Math.PI*.8,Math.PI*.2);X.closePath();X.fill();
+      X.beginPath();X.arc(headR*.05,headY-headR*.85,headR*.2,0,6.28);X.fill();
+      X.fillRect(-headR*.04,headY-headR*1.3,headR*.08,headR*.5);
+      break;
+    case"MR_P":
+      // Top hat + monocle
+      X.fillStyle="#222244";rr(-headR*.45,headY-headR*1.25,headR*.9,headR*.75,3*s);X.fill();
+      X.fillStyle="#334";rr(-headR*.65,headY-headR*.55,headR*1.3,headR*.18,4*s);X.fill();
+      X.strokeStyle="#FFD700";X.lineWidth=2*s;X.beginPath();X.arc(headR*.3,headY-headR*.1,headR*.2,0,6.28);X.stroke();
+      break;
+    case"NITA":
+      // Bear ear headband
+      X.fillStyle=lc(col,20);
+      X.beginPath();X.arc(-headR*.55,headY-headR*.7,headR*.22,0,6.28);X.fill();
+      X.beginPath();X.arc(headR*.55,headY-headR*.7,headR*.22,0,6.28);X.fill();
+      X.fillStyle=lc(col,50);
+      X.beginPath();X.arc(-headR*.55,headY-headR*.7,headR*.12,0,6.28);X.fill();
+      X.beginPath();X.arc(headR*.55,headY-headR*.7,headR*.12,0,6.28);X.fill();
+      break;
+    case"COLETTE":
+      // Heart clip + bow
+      X.fillStyle="#FF4466";X.font=`${r*.28}px serif`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText("💕",-headR*.4,headY-headR*.85);
+      X.fillStyle=ca(col,"CC");X.beginPath();X.ellipse(0,headY-headR*.75,headR*.7,headR*.38,0,0,Math.PI);X.fill();
+      break;
+    case"EDGAR":
+      // Hood
+      X.fillStyle="#223366";X.beginPath();
+      X.arc(0,headY-headR*.2,headR*1.15,Math.PI*.65,Math.PI*.35);X.closePath();X.fill();
+      X.fillStyle=ca("#223366","88");X.beginPath();X.arc(0,headY,headR*.95,Math.PI*.7,Math.PI*.3);X.closePath();X.fill();
+      break;
+    case"LOLA":
+      // Star glasses + wavy hair
+      X.fillStyle="#FF66CC";X.beginPath();X.ellipse(0,headY-headR*.72,headR*.75,headR*.38,0,0,Math.PI);X.fill();
+      X.fillStyle="#FFD700";X.font=`${r*.22}px serif`;X.textAlign="center";
+      X.fillText("★",-headR*.3,headY-headR*.12);X.fillText("★",headR*.3,headY-headR*.12);
+      break;
+    default:
+      // Generic hair
+      X.fillStyle=hairCol;X.beginPath();X.ellipse(0,headY-headR*.65,headR*.65,headR*.38,0,0,Math.PI);X.fill();
+  }
+
+  // ── Eyes ──
+  const eyeY=headY-headR*.08,eyeSpX=headR*.3,eyeR=headR*.14;
+  // Whites
+  X.fillStyle="#FAFFF8";X.beginPath();X.ellipse(-eyeSpX,eyeY,eyeR,eyeR*.85,0,0,6.28);X.fill();
+  X.beginPath();X.ellipse(eyeSpX,eyeY,eyeR,eyeR*.85,0,0,6.28);X.fill();
+  // Pupils (colored for character)
+  const pupilCol=k==="LEON"?"#44CC44":k==="SPIKE"?"#228822":k==="CROW"?"#114411":k==="TARA"?"#330055":"#1A2A6A";
+  X.fillStyle=pupilCol;X.beginPath();X.arc(-eyeSpX+eyeR*.15,eyeY+eyeR*.1,eyeR*.6,0,6.28);X.fill();
+  X.beginPath();X.arc(eyeSpX+eyeR*.15,eyeY+eyeR*.1,eyeR*.6,0,6.28);X.fill();
+  // Eye shine
+  X.fillStyle="rgba(255,255,255,.9)";X.beginPath();X.arc(-eyeSpX+eyeR*.05,eyeY-eyeR*.2,eyeR*.28,0,6.28);X.fill();
+  X.beginPath();X.arc(eyeSpX+eyeR*.05,eyeY-eyeR*.2,eyeR*.28,0,6.28);X.fill();
+
+  // ── Eyebrows (expression) ──
+  X.strokeStyle=ca(dark,"DD");X.lineWidth=headR*.1;X.lineCap="round";
+  const browY=headY-headR*.35;
+  // Each brawler has different expression
+  const angle=k==="BULL"||k==="FRANK"||k==="JACKY"?-.18:k==="POCO"||k==="NITA"?.12:-.08;
+  X.beginPath();X.moveTo(-eyeSpX-eyeR*.5,browY+Math.sin(angle)*eyeR);X.lineTo(-eyeSpX+eyeR*.5,browY-Math.sin(angle)*eyeR);X.stroke();
+  X.beginPath();X.moveTo(eyeSpX-eyeR*.5,browY-Math.sin(angle)*eyeR);X.lineTo(eyeSpX+eyeR*.5,browY+Math.sin(angle)*eyeR);X.stroke();
+  X.lineCap="butt";
+
+  // ── Mouth ──
+  const mouthY=headY+headR*.32;
+  X.strokeStyle=ca(dark,"CC");X.lineWidth=headR*.08;X.lineCap="round";
+  if(k==="POCO"||k==="MAX"||k==="NITA"||k==="LOLA"){
+    // Big smile
+    X.beginPath();X.arc(0,mouthY-headR*.08,headR*.22,.1,Math.PI-.1);X.stroke();
+    // Teeth
+    X.fillStyle="#FFF";rr(-headR*.15,mouthY-headR*.1,headR*.3,headR*.1,headR*.03*s);X.fill();
+  } else if(k==="BULL"||k==="FRANK"||k==="EDGAR"){
+    // Scowl
+    X.beginPath();X.arc(0,mouthY+headR*.12,headR*.2,Math.PI+.2,-.2);X.stroke();
+  } else {
+    // Smirk
+    X.beginPath();X.moveTo(-headR*.18,mouthY);X.quadraticCurveTo(headR*.05,mouthY+headR*.12,headR*.2,mouthY-headR*.06);X.stroke();
+  }
+  X.lineCap="butt";
+
+  // ── Nose ──
+  X.fillStyle=ca(dark,"66");X.beginPath();X.ellipse(headR*.06,headY+headR*.12,headR*.06,headR*.05,0,0,6.28);X.fill();
+
+  // ── Legs ──
+  X.fillStyle=lc(dark,-10);
+  X.save();X.translate(-r*.14,r*.58);X.rotate(-.1);X.beginPath();X.ellipse(0,r*.18,r*.1,r*.22,0,0,6.28);X.fill();X.restore();
+  X.save();X.translate(r*.14,r*.58);X.rotate(.1);X.beginPath();X.ellipse(0,r*.18,r*.1,r*.22,0,0,6.28);X.fill();X.restore();
+  // Shoes
+  X.fillStyle="#222";
+  X.beginPath();X.ellipse(-r*.15,r*.82,r*.13,r*.08,-.1,0,6.28);X.fill();
+  X.beginPath();X.ellipse(r*.15,r*.82,r*.13,r*.08,.1,0,6.28);X.fill();
+
+  X.restore();
+}
+
 /* ═══ DRAW WEAPON ═══ */
 function drawWeapon(b,isPlayer){
   const r=b.r;const S=r/21;X.save();
@@ -3387,14 +3705,34 @@ function hslToHex(h,s,l){
   return"#"+f(0)+f(8)+f(4);
 }
 function saveCreatedBrawler(){
-  if(!CREATE.name||CREATE.name.trim()==="")return;
-  const key="CUSTOM_"+(Date.now()%100000);
-  const bd={key,name:CREATE.name,rarity:CREATE.rarity,color:CREATE.color,dark:CREATE.dark,
-    hp:CREATE.hp,spd:CREATE.spd,wType:CREATE.wType,dmg:CREATE.dmg,superDesc:CREATE.superDesc};
+  if(!CREATE.name||CREATE.name.trim()===""){
+    // Flash name field red as hint
+    CREATE._nameError=true;setTimeout(()=>CREATE._nameError=false,1500);return;
+  }
+  // Generate a stable key based on name + timestamp (mod keeps it short)
+  const key="CUSTOM_"+(Date.now()%1000000);
+  // Build the full save object with all fields
+  const bd={
+    key,
+    name:      CREATE.name.trim(),
+    rarity:    CREATE.rarity||"EPIC",
+    color:     CREATE.color||"#FF8800",
+    dark:      CREATE.dark||"#AA4400",
+    hp:        CREATE.hp||3000,
+    spd:       CREATE.spd||200,
+    wType:     CREATE.wType||"rifle",
+    dmg:       CREATE.dmg||600,
+    superDesc: CREATE.superDesc||"Eigene Super",
+    hue:       CREATE.hue,
+    sat:       CREATE.sat,
+    bri:       CREATE.bri,
+  };
   saveCreatedBrawlerToSlot(bd);
-  // Select the new brawler
+  // Select the newly created brawler
   const idx=BD.findIndex(b=>b.key===key);
   if(idx>=0){SEL=idx;BRAWLER_SEL=idx;}
+  // Show unlock animation
+  showUnlockAnim(BD[idx>=0?idx:BD.length-1]);
   STATE="home";snd("unlock");
 }
 function drawCreateScreen(){
@@ -3469,11 +3807,24 @@ function drawCreateScreen(){
     X.fillText(BC.icon+" "+BC.short,bx+50,by+14);});
   // ── SAVE BUTTON ──────────────────────────────────────────────────
   const pulse=.97+Math.sin(CREATE_PREVIEW_T*2.5)*.03;
+  const nameOk=CREATE.name&&CREATE.name.trim().length>0;
+  const nameErr=CREATE._nameError;
   X.save();X.translate(W/2,H-38);X.scale(pulse,pulse);
-  const sbg=X.createLinearGradient(0,-22,0,22);sbg.addColorStop(0,lc(CREATE.color,40));sbg.addColorStop(1,CREATE.dark);
-  gl(CREATE.color,20);X.fillStyle=sbg;rr(-130,-22,260,44,22);X.fill();X.strokeStyle="#FFD700";X.lineWidth=2.5;rr(-130,-22,260,44,22);X.stroke();ng();
+  const sbg=X.createLinearGradient(0,-22,0,22);
+  if(nameErr){sbg.addColorStop(0,"#FF2222");sbg.addColorStop(1,"#AA0000")}
+  else{sbg.addColorStop(0,lc(CREATE.color,40));sbg.addColorStop(1,CREATE.dark)}
+  gl(nameErr?"#FF4444":CREATE.color,20);
+  X.fillStyle=sbg;rr(-130,-22,260,44,22);X.fill();
+  X.strokeStyle=nameErr?"#FF8888":"#FFD700";X.lineWidth=2.5;rr(-130,-22,260,44,22);X.stroke();ng();
   X.fillStyle="rgba(255,255,255,.2)";rr(-130,-22,260,22,22);X.fill();
-  X.fillStyle="#FFF";X.font='bold 18px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText("✦  "+CREATE.name.toUpperCase()+"  SPEICHERN",0,0);X.restore();
+  X.fillStyle="#FFF";X.font='bold 18px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText(nameErr?"⚠ NAME EINGEBEN!":`✦  ${(CREATE.name||"???").toUpperCase()}  SPEICHERN`,0,0);
+  X.restore();
+  // Slot info
+  const usedSlots=(SAVE.customBrawlers||[]).length;
+  X.fillStyle=usedSlots>=MAX_CUSTOM?"#FF6666":"rgba(180,160,255,.6)";
+  X.font='bold 9px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText(`Eigene Brawler: ${usedSlots} / ${MAX_CUSTOM}`,W/2,H-6);
 }
 
 
@@ -4504,19 +4855,8 @@ function drawMatchmaking(){
   // Rarity color outer ring
   X.strokeStyle=R.color;X.lineWidth=3;
   X.beginPath();X.arc(myX,myY,ringR+8,0,6.28);X.stroke();
-  // Avatar fill
-  const avGr=X.createRadialGradient(myX-20,myY-20,10,myX,myY,ringR);
-  avGr.addColorStop(0,lc(bd.color,50));avGr.addColorStop(1,bd.dark);
-  X.fillStyle=avGr;X.beginPath();X.arc(myX,myY,ringR,0,6.28);X.fill();
-  // Brawler face
-  X.fillStyle="#FFF";X.beginPath();X.ellipse(myX-24,myY-14,16,13,0,0,6.28);X.fill();
-  X.beginPath();X.ellipse(myX+24,myY-14,16,13,0,0,6.28);X.fill();
-  X.fillStyle=bd.dark;X.beginPath();X.arc(myX-18,myY-12,8,0,6.28);X.fill();
-  X.beginPath();X.arc(myX+30,myY-12,8,0,6.28);X.fill();
-  X.fillStyle="rgba(255,255,255,.9)";X.beginPath();X.arc(myX-14,myY-16,3,0,6.28);X.fill();
-  X.beginPath();X.arc(myX+34,myY-16,3,0,6.28);X.fill();
-  X.strokeStyle="rgba(0,0,0,.5)";X.lineWidth=2.5;X.lineCap="round";
-  X.beginPath();X.arc(myX+3,myY+12,14,.2,Math.PI-.2);X.stroke();X.lineCap="butt";
+  // Avatar — use portrait
+  drawBrawlerImage(bd,myX,myY,ringR*.85);
   // Player name + trophies below avatar
   X.fillStyle="#FFF";X.font=`bold 18px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
   gl("#FFF",4);X.fillText(SAVE.name||"Player",myX,myY+ringR+22);ng();
@@ -4541,28 +4881,23 @@ function drawMatchmaking(){
     const sx=myX+Math.cos(t2-Math.PI/2)*arcR*(totalSlots>4?1.1:0.95);
     const sy=myY+Math.sin(t2-Math.PI/2)*arcR*.55;
     if(p.name){
-      // Filled slot
+      // Filled slot — pick a random brawler for their portrait
       const pR=RARITY[p.rarity]||RARITY.COMMON;
-      // Appear animation
-      const appeared=Math.min(1,(MM_T-(p.fillAt-MM_T<0?0:0))*3);
+      const appeared=Math.min(1,(MM_T-(p.fillAt||0))*3);
       X.save();X.globalAlpha=Math.min(1,appeared*2);
       X.translate(sx,sy);X.scale(.8+appeared*.2,.8+appeared*.2);
-      // Avatar circle
-      gl(p.color,10);
-      const sGr=X.createRadialGradient(-8,-8,3,0,0,slotR);
-      sGr.addColorStop(0,lc(p.color,40));sGr.addColorStop(1,p.color);
-      X.fillStyle=sGr;X.beginPath();X.arc(0,0,slotR,0,6.28);X.fill();ng();
-      X.strokeStyle=pR.color;X.lineWidth=2.5;X.beginPath();X.arc(0,0,slotR,0,6.28);X.stroke();
-      // Eyes
-      X.fillStyle="#FFF";X.beginPath();X.ellipse(-12,-7,8,6,0,0,6.28);X.fill();
-      X.beginPath();X.ellipse(12,-7,8,6,0,0,6.28);X.fill();
-      X.fillStyle="#222";X.beginPath();X.arc(-9,-6,4,0,6.28);X.fill();
-      X.beginPath();X.arc(15,-6,4,0,6.28);X.fill();
+      // Rarity glow ring
+      gl(pR.color,8);
+      X.strokeStyle=pR.color;X.lineWidth=2.5;X.beginPath();X.arc(0,0,slotR+3,0,6.28);X.stroke();ng();
+      // Pick a random unlocked brawler for visual (based on name hash)
+      const hash=p.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+      const pBD=BD[hash%BD.length];
+      drawBrawlerImage(pBD,0,0,slotR*.85);
       // Name + trophies
       X.fillStyle="#FFF";X.font=`bold 9px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-      X.fillText(p.name.slice(0,12),0,slotR+12);
+      X.fillText(p.name.slice(0,12),0,slotR+14);
       X.fillStyle="#FFD700";X.font=`bold 8px "Lilita One"`;
-      X.fillText(`🏆${p.trophies}`,0,slotR+24);
+      X.fillText(`🏆${p.trophies}`,0,slotR+26);
       X.restore();
     } else {
       // Empty searching slot
@@ -4695,26 +5030,14 @@ function drawBrawlerCollection(){
     // Rarity strip top
     X.fillStyle=Ri.color;rr(cx+2,cy+2,cardW-4,4,3);X.fill();
 
-    // Brawler mini avatar
-    const aR=22,aX2=cx+cardW/2,aY2=cy+cardH/2-6;
+    // Brawler portrait
+    const aR=28,aX2=cx+cardW/2,aY2=cy+cardH*.48;
     if(!owned){
       X.fillStyle="rgba(0,0,0,.6)";X.beginPath();X.arc(aX2,aY2,aR,0,6.28);X.fill();
       X.fillStyle="rgba(100,90,150,.5)";X.font='20px serif';X.textAlign="center";X.textBaseline="middle";
       X.fillText("🔒",aX2,aY2);
     } else {
-      const aGr=X.createRadialGradient(aX2-5,aY2-5,3,aX2,aY2,aR*1.1);
-      aGr.addColorStop(0,lc(b.color,50));aGr.addColorStop(1,b.dark);
-      if(isSel)gl(b.color,10);
-      X.fillStyle=aGr;X.beginPath();X.arc(aX2,aY2,aR,0,6.28);X.fill();ng();
-      X.strokeStyle=isSel?b.color:b.dark;X.lineWidth=isSel?2:1.5;X.stroke();
-      // Eyes
-      X.fillStyle="#FFF";X.beginPath();X.ellipse(aX2-6,aY2-3,4,3.2,0,0,6.28);X.fill();
-      X.beginPath();X.ellipse(aX2+6,aY2-3,4,3.2,0,0,6.28);X.fill();
-      X.fillStyle="#111";X.beginPath();X.arc(aX2-5,aY2-2,1.8,0,6.28);X.fill();
-      X.beginPath();X.arc(aX2+7,aY2-2,1.8,0,6.28);X.fill();
-      // Smile
-      X.strokeStyle="rgba(0,0,0,.6)";X.lineWidth=1.5;X.lineCap="round";
-      X.beginPath();X.arc(aX2,aY2+aR*.2,aR*.18,.1,Math.PI-.1);X.stroke();X.lineCap="butt";
+      drawBrawlerImage(b,aX2,aY2,aR);
     }
 
     // Name
@@ -4779,34 +5102,17 @@ function drawBrawlerCollection(){
   X.fillStyle=rstGr;rr(panX,panY,panW,5,3);X.fill();
 
   // Big brawler avatar
-  const bigAR=44,bigAY=panY+60;
+  const bigAR=55,bigAY=panY+72;
   if(owned){
-    const sR=bigAR,sw=T*1.2,sBob=Math.abs(Math.sin(sw*6))*2;
-    const sS=sR/21,lW=5*sS,lH=12*sS,lSp=5*sS,aW=4*sS,aH=10*sS;
-    const bW=14*sS,bH=14*sS,bY2=-11*sS,hR=8*sS,hY2=bY2-hR+2*sS,aY3=bY2+2*sS;
-    X.save();X.translate(cx2,bigAY+sBob);
-    X.fillStyle=lc(bd.dark,-8);
-    X.save();X.translate(-lSp,2*sS);X.rotate(Math.sin(sw*6)*.28);X.beginPath();X.ellipse(0,lH/2,lW/2,lH/2,0,0,6.28);X.fill();X.restore();
-    X.save();X.translate(lSp,2*sS);X.rotate(-Math.sin(sw*6)*.28);X.beginPath();X.ellipse(0,lH/2,lW/2,lH/2,0,0,6.28);X.fill();X.restore();
-    gl(bd.color,16);X.fillStyle=bd.color;X.fillRect(-bW/2,bY2,bW,bH);ng();
-    X.fillStyle="rgba(255,255,255,.2)";X.fillRect(-bW/2+1,bY2+1,bW*.5,bH*.3);
-    X.fillStyle=bd.dark;X.fillRect(-bW/2,2*sS-2,bW,3*sS);
-    gl(bd.color,12);X.fillStyle=bd.color;X.beginPath();X.arc(0,hY2,hR,0,6.28);X.fill();ng();
-    X.fillStyle=bd.dark;X.beginPath();X.ellipse(0,hY2-hR+1,hR*.9,hR*.25,0,Math.PI,0);X.fill();
-    X.fillRect(-hR*.9,hY2-hR-hR*.42,hR*1.8,hR*.48);
-    const eY2=hY2-hR*.06,eR2=hR*.2;
-    X.fillStyle="#FFF";X.beginPath();X.ellipse(-hR*.36,eY2,eR2,eR2*.82,0,0,6.28);X.fill();
-    X.beginPath();X.ellipse(hR*.36,eY2,eR2,eR2*.82,0,0,6.28);X.fill();
-    X.fillStyle="#1A3A7A";X.beginPath();X.arc(-hR*.32,eY2+1,eR2*.52,0,6.28);X.fill();
-    X.beginPath();X.arc(hR*.4,eY2+1,eR2*.52,0,6.28);X.fill();
-    X.restore();
+    const bob=Math.abs(Math.sin(T*1.2*6))*3;
+    drawBrawlerImage(bd,cx2,bigAY+bob,bigAR);
   } else {
     X.fillStyle="rgba(0,0,0,.5)";X.beginPath();X.arc(cx2,bigAY,bigAR,0,6.28);X.fill();
     X.strokeStyle=ca(R.color,"44");X.lineWidth=2;X.stroke();
-    X.font='36px serif';X.textAlign="center";X.textBaseline="middle";X.fillText("🔒",cx2,bigAY);
+    X.font='40px serif';X.textAlign="center";X.textBaseline="middle";X.fillText("🔒",cx2,bigAY);
   }
 
-  let ry=panY+118;
+  let ry=panY+148;
 
   // Name
   gl(R.color,8);X.fillStyle="#FFF";X.font=`bold 16px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
@@ -5162,10 +5468,12 @@ function drawBrawlPassTab(cY,cH){
   }
 
   // ── REWARD ROWS ──
-  const visStart=drawUpgradeScreen._bpVisStart||Math.max(0,Math.floor(tier/5)*5);
   const numCols=5; // show 5 tiles per row
   const tW=(tileAreaW-8)/numCols-5;
   const tH=rowH-10;
+  // Show the page containing the current tier by default (only if not manually scrolled)
+  const autoStart=Math.max(0,Math.floor((tier-1)/numCols)*numCols);
+  const visStart=drawUpgradeScreen._bpVisStart!==undefined?drawUpgradeScreen._bpVisStart:autoStart;
 
   // Draw free row (top) and premium row (bottom)
   for(let row=0;row<2;row++){
@@ -5390,7 +5698,7 @@ function handleUpgradeClick(x,y){
   if(x<90&&y<44){STATE="home";snd("select");return}
   // Tabs
   const tabW=(W-20)/5,tabY=54;
-  for(let i=0;i<5;i++){const tx=10+i*tabW;if(x>=tx&&x<=tx+tabW-4&&y>=tabY&&y<=tabY+36){UPGRADE_TAB=i;snd("select");return}}
+  for(let i=0;i<5;i++){const tx=10+i*tabW;if(x>=tx&&x<=tx+tabW-4&&y>=tabY&&y<=tabY+36){if(i===3)drawUpgradeScreen._bpVisStart=undefined;UPGRADE_TAB=i;snd("select");return}}
 
   if(UPGRADE_TAB===0&&d._upBtn?.canUp&&Math.abs(x-W/2)<120&&y>d._upBtn.y&&y<d._upBtn.y+44){
     if(doLevelUp(BD[SEL].key)){snd("unlock");burst(W/2,d._upBtn.y,BD[SEL].color,BD[SEL].dark,22,.9)}
@@ -5713,6 +6021,125 @@ function update(){
     if(SHK>0){SHK=Math.max(0,SHK-DT*3.5);SHX=(Math.random()-.5)*11*SHK;SHY=(Math.random()-.5)*11*SHK}else{SHX=0;SHY=0}
   }
 }
+/* ═══ BROWSER CONSOLE HACK ═══ */
+// Open browser DevTools (F12) and use these commands:
+(function(){
+  const Y='color:#FFD700;font-weight:bold;font-size:14px;text-shadow:0 0 8px #FF8800';
+  const G='color:#888;font-size:11px';
+  const C='color:#44FFAA;font-weight:bold;font-size:12px';
+
+  // Big styled header + commands
+  console.log(
+    '%c╔══════════════════════════════════════╗\n'+
+    '║   🎮 BRAWL RUSH  ·  CHEAT CONSOLE   ║\n'+
+    '╚══════════════════════════════════════╝',
+    Y);
+  console.log('%cVerfügbare Befehle (einfach eintippen):','color:#888;font-size:11px');
+  const cmds=[
+    ['hack.trophies(9999)',  'Trophäen setzen'],
+    ['hack.coins(99999)',    'Münzen setzen'],
+    ['hack.gems(999)',       'Gems setzen'],
+    ['hack.rank(20)',        'Rang 1-30 setzen'],
+    ['hack.pp(500)',         'Power Points hinzufügen'],
+    ['hack.drops(5)',        'Starr Drops hinzufügen'],
+    ['hack.unlockAll()',     'Alle Brawler freischalten'],
+    ['hack.brawlPass(70)',   'Brawl Pass Tier setzen'],
+    ['hack.maxAll()',        '🚀 ALLES auf Maximum'],
+    ['hack.status()',        'Aktuellen Status anzeigen'],
+    ['hack.reset()',         '⚠ Spielstand zurücksetzen'],
+  ];
+  cmds.forEach(([cmd,desc])=>console.log('%c  '+cmd.padEnd(26)+'%c'+desc,'color:#44FFAA;font-weight:bold;font-size:11px','color:#888;font-size:11px'));
+  console.log('%c──────────────────────────────────────','color:#333');
+
+  function _save(){try{persist();snd('coin')}catch{}}
+  function _log(msg){console.log('%c✅ '+msg,'color:#44FF88;font-weight:bold;font-size:12px')}
+  function _err(msg){console.log('%c❌ '+msg,'color:#FF4444;font-weight:bold;font-size:12px')}
+
+  window.hack={
+    trophies(n){
+      n=Math.max(0,Math.min(9999999,+n));
+      if(isNaN(n))return _err('Ungültige Zahl');
+      SAVE.trophies=n;_save();
+      _log(`Trophäen → ${n}  (Rang ${getRank(n)})`);
+    },
+    coins(n){
+      n=Math.max(0,Math.min(9999999,+n));
+      if(isNaN(n))return _err('Ungültige Zahl');
+      SAVE.coins=n;_save();_log(`Münzen → ${n}`);
+    },
+    gems(n){
+      n=Math.max(0,Math.min(999999,+n));
+      if(isNaN(n))return _err('Ungültige Zahl');
+      SAVE.gems=n;_save();_log(`Gems → ${n}`);
+    },
+    drops(n){
+      n=Math.max(0,+n)||1;
+      SAVE.starrDrops=(SAVE.starrDrops||0)+n;_save();
+      _log(`+${n} Starr Drop(s) — gesamt: ${SAVE.starrDrops}`);
+    },
+    unlockAll(){
+      BD.forEach(b=>{if(!SAVE.unlocked.includes(b.key))SAVE.unlocked.push(b.key)});
+      _save();_log(`Alle ${BD.length} Brawler freigeschaltet! 🎯`);
+    },
+    brawlPass(tier=70,premium=true){
+      tier=Math.max(1,Math.min(70,+tier));
+      SAVE.brawlPassTier=tier;SAVE.brawlPassPremium=premium;SAVE.brawlPassXP=0;
+      _save();_log(`Brawl Pass → Tier ${tier}${premium?' + Premium ⭐':''}`);
+    },
+    maxAll(){
+      SAVE.trophies=99999;SAVE.coins=999999;SAVE.gems=9999;SAVE.starrDrops=99;
+      SAVE.brawlPassTier=70;SAVE.brawlPassPremium=true;
+      BD.forEach(b=>{
+        if(!SAVE.unlocked.includes(b.key))SAVE.unlocked.push(b.key);
+        SAVE.powerLevel[b.key]=11;SAVE.powerPoints[b.key]=9999;
+      });
+      _save();
+      console.log('%c🚀 MAX ALLES AKTIVIERT!','color:#FFD700;font-weight:bold;font-size:16px');
+      console.table({'🏆 Trophäen':99999,'🪙 Münzen':999999,'💎 Gems':9999,'📦 Drops':99,'🎫 BP':'Tier 70 Premium','⚡ PL':'11 überall'});
+    },
+    rank(r){
+      const thresholds=[0,50,100,200,350,550,800,1100,1500,2000,2600,3300,4100,5000,6000,7200,8500,10000,12000,15000,20000,25000,30000,35000,40000,50000,60000,70000,80000,100000];
+      r=Math.max(1,Math.min(30,+r));
+      SAVE.trophies=thresholds[r-1]||0;_save();
+      _log(`Rang ${r} gesetzt → ${SAVE.trophies} Trophäen`);
+    },
+    pp(amount,brawlerKey){
+      const key=brawlerKey||(typeof SEL!=='undefined'&&BD[SEL]?.key)||'SHELLY';
+      amount=Math.max(0,+amount)||500;
+      if(!SAVE.powerPoints)SAVE.powerPoints={};
+      SAVE.powerPoints[key]=(SAVE.powerPoints[key]||0)+amount;
+      _save();_log(`+${amount} PP für ${key} (gesamt: ${SAVE.powerPoints[key]})`);
+    },
+    status(){
+      console.log('%c📊 BRAWL RUSH — SPIELSTAND','color:#FFD700;font-weight:bold;font-size:14px');
+      console.table({
+        '🏆 Trophäen': SAVE.trophies,
+        '🎯 Rang': typeof getRank!=='undefined'?getRank(SAVE.trophies):'?',
+        '🪙 Münzen': SAVE.coins,
+        '💎 Gems': SAVE.gems,
+        '📦 Starr Drops': SAVE.starrDrops||0,
+        '🎫 BP Tier': (SAVE.brawlPassTier||1)+'/70',
+        '🎫 BP Premium': SAVE.brawlPassPremium?'✅ Ja':'❌ Nein',
+        '🎮 Brawler': (SAVE.unlocked?.length||0)+'/'+(typeof BD!=='undefined'?BD.length:0),
+        '🏅 Siege': SAVE.totalWins||0,
+        '🗡 Kills': SAVE.totalKills||0,
+      });
+    },
+    save(){persist();_log('Gespeichert! 💾')},
+    reset(){
+      if(!confirm('Spielstand wirklich löschen?'))return _err('Abgebrochen');
+      localStorage.removeItem('brawlrush');location.reload();
+    },
+    help(){
+      console.log('%c📖 hack.help() — Alle Befehle:','color:#FFD700;font-weight:bold;font-size:13px');
+      cmds.forEach(([cmd,desc])=>console.log('%c  '+cmd.padEnd(26)+'%c'+desc,'color:#44FFAA;font-weight:bold','color:#888'));
+    }
+  };
+  // Also expose brawlhack as alias
+  window.brawlhack=()=>{hack.status();console.log('%cTipp: hack.maxAll() für alles auf Max!','color:#FF8800;font-weight:bold')};
+})();
+
+
 function render(){
   X.clearRect(0,0,W,H);
   X.imageSmoothingEnabled=true;X.imageSmoothingQuality="high";
@@ -5750,6 +6177,7 @@ function render(){
   if(MODE==="brawlball")drawBrawlBallHUD();
   if(STATE==="win")drawEnd(true);
   if(STATE==="lose")drawEnd(false);
+  // DevTools overlay — always on top of everything
 }
 function loop(ts){
   DT=Math.min((ts-LT)/1000,.05);LT=ts;
@@ -5757,5 +6185,77 @@ function loop(ts){
   try{render()}catch(err){console.error("RENDER CRASH:",err.message,"\nStack:",err.stack);if(!window._errShown){window._errShown=1;alert("Render error: "+err.message)}}
   requestAnimationFrame(loop)
 }
-buildCache();requestAnimationFrame(loop);
+buildCache();
+
+/* ═══ BRAWLER IMAGE LOADER ═══ */
+// Maps key → wikia portrait URL. Loaded in browser (no proxy restriction for players).
+const BRAWLER_IMG_URLS={
+  SHELLY:  "https://static.wikia.nocookie.net/brawlstars/images/5/5e/Shelly_Portrait.png",
+  COLT:    "https://static.wikia.nocookie.net/brawlstars/images/9/91/Colt_Portrait.png",
+  BULL:    "https://static.wikia.nocookie.net/brawlstars/images/2/25/Bull_Portrait.png",
+  BROCK:   "https://static.wikia.nocookie.net/brawlstars/images/7/7e/Brock_Portrait.png",
+  DYNA:    "https://static.wikia.nocookie.net/brawlstars/images/4/47/Dynamike_Portrait.png",
+  PIPER:   "https://static.wikia.nocookie.net/brawlstars/images/e/e2/Piper_Portrait.png",
+  POCO:    "https://static.wikia.nocookie.net/brawlstars/images/8/8c/Poco_Portrait.png",
+  ROSA:    "https://static.wikia.nocookie.net/brawlstars/images/e/e8/Rosa_Portrait.png",
+  LEON:    "https://static.wikia.nocookie.net/brawlstars/images/8/81/Leon_Portrait.png",
+  SPIKE:   "https://static.wikia.nocookie.net/brawlstars/images/8/82/Spike_Portrait.png",
+  TARA:    "https://static.wikia.nocookie.net/brawlstars/images/7/73/Tara_Portrait.png",
+  FRANK:   "https://static.wikia.nocookie.net/brawlstars/images/4/46/Frank_Portrait.png",
+  MORTIS:  "https://static.wikia.nocookie.net/brawlstars/images/e/e3/Mortis_Portrait.png",
+  JACKY:   "https://static.wikia.nocookie.net/brawlstars/images/0/01/Jacky_Portrait.png",
+  EMZ:     "https://static.wikia.nocookie.net/brawlstars/images/5/55/EMZ_Portrait.png",
+  CROW:    "https://static.wikia.nocookie.net/brawlstars/images/4/4e/Crow_Portrait.png",
+  SANDY:   "https://static.wikia.nocookie.net/brawlstars/images/6/62/Sandy_Portrait.png",
+  LILY:    "https://static.wikia.nocookie.net/brawlstars/images/3/38/Lily_Portrait.png",
+  BIBI:    "https://static.wikia.nocookie.net/brawlstars/images/9/9d/Bibi_Portrait.png",
+  PAM:     "https://static.wikia.nocookie.net/brawlstars/images/b/bd/Pam_Portrait.png",
+  TICK:    "https://static.wikia.nocookie.net/brawlstars/images/4/42/Tick_Portrait.png",
+  GENE:    "https://static.wikia.nocookie.net/brawlstars/images/8/8e/Gene_Portrait.png",
+  MAX:     "https://static.wikia.nocookie.net/brawlstars/images/4/4d/Max_Portrait.png",
+  MR_P:    "https://static.wikia.nocookie.net/brawlstars/images/0/0e/Mr.P_Portrait.png",
+  NITA:    "https://static.wikia.nocookie.net/brawlstars/images/1/1d/Nita_Portrait.png",
+  COLETTE: "https://static.wikia.nocookie.net/brawlstars/images/0/0d/Colette_Portrait.png",
+  EDGAR:   "https://static.wikia.nocookie.net/brawlstars/images/0/04/Edgar_Portrait.png",
+  LOLA:    "https://static.wikia.nocookie.net/brawlstars/images/9/9b/Lola_Portrait.png",
+};
+const BRAWLER_IMGS={}; // key → Image object (loaded or loading)
+let IMGS_LOADED=0,IMGS_TOTAL=0;
+
+function preloadBrawlerImages(){
+  const keys=Object.keys(BRAWLER_IMG_URLS);
+  IMGS_TOTAL=keys.length;
+  keys.forEach(key=>{
+    const img=new Image();
+    img.crossOrigin="anonymous";
+    img.onload=()=>{BRAWLER_IMGS[key]=img;IMGS_LOADED++;};
+    img.onerror=()=>{IMGS_TOTAL--;};// silently skip if unavailable
+    img.src=BRAWLER_IMG_URLS[key];
+    BRAWLER_IMGS[key]=img; // store immediately so we can check .complete
+  });
+}
+preloadBrawlerImages();
+
+// Draw portrait: use real image if loaded, fall back to canvas portrait
+function drawBrawlerImage(b,cx,cy,r){
+  const img=BRAWLER_IMGS[b.key];
+  if(img&&img.complete&&img.naturalWidth>0){
+    // Clip to circle
+    X.save();
+    X.beginPath();X.arc(cx,cy,r,0,6.28);X.clip();
+    // Draw image centered and scaled to fit
+    const scale=r*2/Math.min(img.naturalWidth,img.naturalHeight);
+    const iw=img.naturalWidth*scale,ih=img.naturalHeight*scale;
+    X.drawImage(img,cx-iw/2,cy-ih/2,iw,ih);
+    X.restore();
+    // Border ring
+    X.strokeStyle=ca(b.color,"CC");X.lineWidth=3;
+    X.beginPath();X.arc(cx,cy,r,0,6.28);X.stroke();
+  } else {
+    // Fallback: canvas portrait
+    drawBrawlerPortrait(b,cx,cy,r);
+  }
+}
+
+requestAnimationFrame(loop);
 </script></body></html>
