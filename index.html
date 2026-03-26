@@ -60,6 +60,7 @@ if(SAVE.sound===undefined)SAVE.sound=true;
 if(!SAVE.lang)SAVE.lang="DE";
 if(!SAVE.trophies)SAVE.trophies=0;
 if(!SAVE.brawlerTrophies)SAVE.brawlerTrophies={};
+if(!SAVE.winStreak)SAVE.winStreak={};  // {key: consecutiveWins}
 if(!SAVE.name)SAVE.name="Brawler";
 if(!SAVE.customBrawler)SAVE.customBrawler=null;
 if(!SAVE.customBrawlers)SAVE.customBrawlers=[];
@@ -156,6 +157,7 @@ const STAR_POWERS={
   GENE:   {name:"Magic Puffs",nameDE:"Magie-Wölkchen",desc:"Heilt Verbündete passiv",icon:"✨"},
   MAX:    {name:"Run n Gun",nameDE:"Rennen & Schießen",desc:"Nachladen während Rennen",icon:"🏃"},
   MR_P:   {name:"Mr. Familiar",nameDE:"Mr. Vertraut",desc:"Porter haben mehr HP und Schaden",icon:"🎩"},
+  EDGAR:  {name:"Fisticuffs",nameDE:"Schlägerei",desc:"Schaden nehmen lädt Super auf; +50% Heilung pro Treffer",icon:"🥊"},
 };
 // Gadget cooldowns state
 let GADGET_CD=0;
@@ -590,31 +592,301 @@ const STARR_DROP_POOL=[
   {type:'pp',value:20,weight:25},{type:'pp',value:50,weight:12},{type:'pp',value:100,weight:5},
   {type:'gadget',weight:4},{type:'starpower',weight:2},
 ];
-let STARR_DROP_ANIM=null;
-function openStarrDrop(){
+/* ═══ STARR DROP SYSTEM ═══ */
+const SD_RARITIES={
+  RARE:       {name:"Rare",       col:"#3AA0FF", glow:"#88CCFF", chance:0.55},
+  SUPER_RARE: {name:"Super Rare", col:"#3AFF7A", glow:"#88FFAA", chance:0.30},
+  EPIC:       {name:"Epic",       col:"#B94EFF", glow:"#DD99FF", chance:0.12},
+  MYTHIC:     {name:"Mythic",     col:"#FF4E4E", glow:"#FF9988", chance:0.025},
+  LEGENDARY:  {name:"Legendary",  col:"#FFD700", glow:"#FFFAAA", chance:0.005},
+};
+const SD_RARITY_ORDER=["RARE","SUPER_RARE","EPIC","MYTHIC","LEGENDARY"];
+
+let SD_STATE=null; // null | {rarity, scale, rot, wobble, wobbleV, phase, particles, flashAlpha, reward, _from}
+
+function startStarrDropScreen(fromState){
   if(SAVE.starrDrops<=0)return;
-  SAVE.starrDrops--;
-  // Weighted random pick
-  const totalW=STARR_DROP_POOL.reduce((s,i)=>s+i.weight,0);
-  let r=Math.random()*totalW;
-  let reward=STARR_DROP_POOL[0];
-  for(const item of STARR_DROP_POOL){r-=item.weight;if(r<=0){reward=item;break}}
+  // Pick initial rarity
+  const r=Math.random();
+  let cum=0, rar="RARE";
+  for(const k of SD_RARITY_ORDER){cum+=SD_RARITIES[k].chance;if(r<cum){rar=k;break;}}
+  SD_STATE={rarity:rar,scale:0.01,rot:0,wobble:0,wobbleV:0,phase:"idle",particles:[],flashAlpha:0,reward:null,_from:fromState||"home",_popT:0};
+  SAVE.starrDrops--;persist();
+  STATE="starrdrop";
+}
+
+function upgradeStarrDropRarity(){
+  const idx=SD_RARITY_ORDER.indexOf(SD_STATE.rarity);
+  if(idx<SD_RARITY_ORDER.length-1)SD_STATE.rarity=SD_RARITY_ORDER[idx+1];
+}
+
+function openStarrDropReward(){
   const key=BD[SEL]?.key||'SHELLY';
+  // Weighted reward pool based on rarity
+  const rarIdx=SD_RARITY_ORDER.indexOf(SD_STATE.rarity);
+  let reward;
+  const r2=Math.random();
+  if(rarIdx<=1){// Rare/Super Rare
+    if(r2<0.40)reward={type:'coins',value:100+rarIdx*150};
+    else if(r2<0.70)reward={type:'pp',value:20+rarIdx*30};
+    else if(r2<0.88)reward={type:'gems',value:5+rarIdx*5};
+    else if(r2<0.96)reward={type:'coins',value:500+rarIdx*250};
+    else reward={type:'gadget'};
+  } else if(rarIdx===2){// Epic
+    if(r2<0.35)reward={type:'pp',value:100};
+    else if(r2<0.60)reward={type:'gems',value:20};
+    else if(r2<0.80)reward={type:'coins',value:1000};
+    else if(r2<0.92)reward={type:'gadget'};
+    else reward={type:'starpower'};
+  } else {// Mythic / Legendary
+    if(r2<0.30)reward={type:'gems',value:30+rarIdx*10};
+    else if(r2<0.55)reward={type:'pp',value:200+rarIdx*100};
+    else if(r2<0.75)reward={type:'starpower'};
+    else reward={type:'coins',value:2000+rarIdx*1000};
+  }
+  // Apply reward
   let label='';
   if(reward.type==='coins'){SAVE.coins+=reward.value;label=`🪙 +${reward.value} Münzen`}
   else if(reward.type==='gems'){SAVE.gems+=reward.value;label=`💎 +${reward.value} Gems`}
-  else if(reward.type==='pp'){SAVE.powerPoints[key]=(SAVE.powerPoints[key]||0)+reward.value;label=`⚡ +${reward.value} Power-Punkte (${BD[SEL]?.name})`}
-  else if(reward.type==='gadget'){SAVE.gadgets[key]=true;label=`🔧 Gadget: ${GADGETS[key]?.nameDE||'Gadget'}!`}
-  else if(reward.type==='starpower'){SAVE.starPowers[key]=true;label=`⭐ Sternenkraft: ${STAR_POWERS[key]?.nameDE||'Star Power'}!`}
-  STARR_DROP_ANIM={label,t:0,dur:3.5,color:reward.type==='starpower'?"#FFD700":reward.type==='gadget'?"#FF8800":"#44FFDD"};
+  else if(reward.type==='pp'){SAVE.powerPoints[key]=(SAVE.powerPoints[key]||0)+reward.value;label=`⚡ +${reward.value} Power-Punkte`}
+  else if(reward.type==='gadget'){SAVE.gadgets[key]=true;label=`🔧 ${GADGETS[key]?.nameDE||'Gadget'} freigeschaltet!`}
+  else if(reward.type==='starpower'){SAVE.starPowers[key]=true;label=`⭐ ${STAR_POWERS[key]?.nameDE||'Star Power'} freigeschaltet!`}
+  reward.label=label;
+  SD_STATE.reward=reward;
   persist();snd("unlock");
+  // Trigger particle explosion
+  const rar=SD_RARITIES[SD_STATE.rarity];
+  for(let i=0;i<60;i++){
+    const a2=Math.random()*6.28,spd=120+Math.random()*220;
+    const type=Math.random()<0.5?'coin':'gem';
+    SD_STATE.particles.push({x:W/2,y:H/2,vx:Math.cos(a2)*spd,vy:Math.sin(a2)*spd-80,life:1.2+Math.random()*.8,maxLife:2,rot:Math.random()*6.28,type,col:type==='coin'?'#FFD700':rar.col});
+  }
 }
+
+function updateStarrDrop(){
+  if(!SD_STATE)return;
+  const s=SD_STATE;
+  // Pop-in
+  if(s.scale<1){s.scale=Math.min(1,s.scale+DT*4);if(s.scale>=1)s.scale=1;}
+  // Wobble physics
+  s.wobbleV+=-s.wobble*18-s.wobbleV*5;s.wobble+=s.wobbleV*DT;
+  s.rot+=s.wobble*DT;
+  // Flash fade
+  if(s.flashAlpha>0)s.flashAlpha=Math.max(0,s.flashAlpha-DT*3);
+  // Particles
+  for(let i=s.particles.length-1;i>=0;i--){
+    const p=s.particles[i];p.x+=p.vx*DT;p.y+=p.vy*DT;p.vy+=320*DT;p.life-=DT;p.rot+=DT*5;
+    if(p.life<=0)s.particles.splice(i,1);
+  }
+  // Pop-out after reward shown
+  if(s.phase==="done"){s._popT=(s._popT||0)+DT;if(s._popT>1.8){STATE=s._from;SD_STATE=null;}}
+}
+
+function drawStarrDrop(rarity,scale,rotation){
+  const rar=SD_RARITIES[rarity]||SD_RARITIES.RARE;
+  X.save();
+  X.translate(W/2,H/2);
+  X.rotate(rotation);
+  const wobble=SD_STATE?.wobble||0;
+  const sx=scale*(1+wobble*0.15), sy=scale*(1-wobble*0.1);
+  X.scale(sx,sy);
+  // Outer glow
+  const gGr=X.createRadialGradient(0,0,10,0,0,80);
+  gGr.addColorStop(0,rar.col+'AA');gGr.addColorStop(1,'transparent');
+  X.fillStyle=gGr;X.beginPath();X.arc(0,0,80,0,6.28);X.fill();
+  // Box body
+  const bw=90,bh=96,br=18;
+  const boxGr=X.createLinearGradient(-bw/2,-bh/2,-bw/2,bh/2);
+  boxGr.addColorStop(0,rar.col);boxGr.addColorStop(0.5,rar.glow);boxGr.addColorStop(1,rar.col);
+  X.fillStyle=boxGr;rr(-bw/2,-bh/2,bw,bh,br);X.fill();
+  // Shine
+  X.fillStyle='rgba(255,255,255,0.22)';rr(-bw/2+6,-bh/2+6,bw-12,bh*.38,br-4);X.fill();
+  // Border
+  X.strokeStyle='rgba(255,255,255,0.55)';X.lineWidth=3;rr(-bw/2,-bh/2,bw,bh,br);X.stroke();
+  // Star icon
+  X.font='44px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('⭐',0,-4);
+  // Rarity label on box
+  X.strokeStyle='rgba(0,0,0,0.7)';X.lineWidth=4;X.font=`bold 11px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+  X.strokeText(rar.name.toUpperCase(),0,bh/2-14);
+  X.fillStyle='#FFF';X.fillText(rar.name.toUpperCase(),0,bh/2-14);
+  X.restore();
+}
+
+function drawStarrDropScreen(){
+  if(!SD_STATE)return;
+  const s=SD_STATE;
+  const rar=SD_RARITIES[s.rarity];
+  // BG
+  const bg=X.createRadialGradient(W/2,H/2,60,W/2,H/2,500);
+  bg.addColorStop(0,'#1A1040');bg.addColorStop(1,'#060310');
+  X.fillStyle=bg;X.fillRect(0,0,W,H);
+  // Animated ring rays
+  X.save();X.translate(W/2,H/2);
+  for(let i=0;i<16;i++){
+    const a2=i/16*6.28+T*.3;
+    X.globalAlpha=0.06+Math.sin(T*2+i)*.03;
+    X.strokeStyle=rar.col;X.lineWidth=2;
+    X.beginPath();X.moveTo(0,0);X.lineTo(Math.cos(a2)*520,Math.sin(a2)*520);X.stroke();
+  }
+  X.globalAlpha=1;X.restore();
+  // Particles
+  for(const p of s.particles){
+    const alpha=Math.min(1,p.life/0.4);
+    X.save();X.globalAlpha=alpha;X.translate(p.x,p.y);X.rotate(p.rot);
+    if(p.type==='coin'){X.fillStyle='#FFD700';X.beginPath();X.arc(0,0,7,0,6.28);X.fill();X.fillStyle='#AA8800';X.font='bold 8px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('$',0,0);}
+    else{X.fillStyle=p.col;X.beginPath();for(let i2=0;i2<6;i2++){const aa=i2/6*6.28;X.lineTo(Math.cos(aa)*8,Math.sin(aa)*8);}X.closePath();X.fill();}
+    X.restore();
+  }
+  // Drop box
+  drawStarrDrop(s.rarity,s.scale,s.rot);
+  // Tap hint or reward text
+  if(s.phase==="idle"&&s.scale>=0.98){
+    const pulse=0.75+Math.sin(T*3)*.25;
+    X.globalAlpha=pulse;
+    X.strokeStyle='rgba(0,0,0,0.8)';X.lineWidth=5;X.font=`bold 18px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+    X.strokeText('Tippe um zu öffnen!',W/2,H/2+100);
+    X.fillStyle='#FFFFFF';X.fillText('Tippe um zu öffnen!',W/2,H/2+100);
+    X.globalAlpha=1;
+    // Drop count badge
+    const dc=SAVE.starrDrops||0;
+    if(dc>0){
+      X.fillStyle='rgba(0,0,0,0.5)';rr(W/2-40,H/2+122,80,24,12);X.fill();
+      X.strokeStyle='rgba(255,255,255,0.3)';X.lineWidth=1;rr(W/2-40,H/2+122,80,24,12);X.stroke();
+      X.fillStyle='rgba(255,255,255,0.7)';X.font=`bold 11px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+      X.fillText(`📦 Noch ${dc} übrig`,W/2,H/2+134);
+    }
+  }
+  if(s.phase==="done"&&s.reward){
+    const alpha=Math.min(1,(s._popT||0)/0.3);
+    X.globalAlpha=alpha;
+    // Reward banner
+    const bw=360,bh=70,bx=W/2-bw/2,by=H/2+112;
+    const rewGr=X.createLinearGradient(bx,by,bx+bw,by);
+    rewGr.addColorStop(0,rar.col+'44');rewGr.addColorStop(0.5,rar.col+'88');rewGr.addColorStop(1,rar.col+'44');
+    X.fillStyle=rewGr;rr(bx,by,bw,bh,18);X.fill();
+    X.strokeStyle=rar.col;X.lineWidth=2;rr(bx,by,bw,bh,18);X.stroke();
+    X.strokeStyle='rgba(0,0,0,0.9)';X.lineWidth=5;X.font=`bold 22px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+    X.strokeText(s.reward.label,W/2,by+bh/2-8);
+    X.fillStyle=rar.col;X.fillText(s.reward.label,W/2,by+bh/2-8);
+    X.strokeStyle='rgba(0,0,0,0.6)';X.lineWidth=3;X.font=`bold 12px "Lilita One"`;
+    X.strokeText('Tippe zum Schließen',W/2,by+bh/2+16);
+    X.fillStyle='rgba(255,255,255,0.6)';X.fillText('Tippe zum Schließen',W/2,by+bh/2+16);
+    X.globalAlpha=1;
+  }
+  // Full-screen flash on upgrade
+  if(s.flashAlpha>0){
+    X.globalAlpha=s.flashAlpha;X.fillStyle='#FFFFFF';X.fillRect(0,0,W,H);X.globalAlpha=1;
+  }
+  // Rarity label top
+  X.strokeStyle='rgba(0,0,0,0.8)';X.lineWidth=5;X.font=`bold 16px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+  X.strokeText('STARR DROP',W/2,44);
+  gl(rar.col,8);X.fillStyle=rar.col;X.fillText('STARR DROP',W/2,44);ng();
+}
+
+function handleStarrDropClick(){
+  if(!SD_STATE)return;
+  const s=SD_STATE;
+  if(s.scale<0.95)return;
+  if(s.phase==="done"){STATE=s._from;SD_STATE=null;return;}
+  if(s.phase==="idle"){
+    // Chance to upgrade rarity
+    const curIdx=SD_RARITY_ORDER.indexOf(s.rarity);
+    const upgradeRoll=Math.random();
+    let upgraded=false;
+    if(curIdx<SD_RARITY_ORDER.length-1){
+      const upgradeChance=[0.35,0.25,0.15,0.08][curIdx]||0;
+      if(upgradeRoll<upgradeChance){
+        upgradeStarrDropRarity();
+        s.flashAlpha=1;s.wobbleV=12;upgraded=true;snd("unlock");
+        return; // let player tap again on upgraded rarity
+      }
+    }
+    // Open!
+    s.wobbleV=18;s.phase="opening";
+    setTimeout(()=>{
+      if(!SD_STATE)return;
+      openStarrDropReward();
+      SD_STATE.phase="done";SD_STATE._popT=0;
+    },400);
+  }
+}
+/* ═══ TROPHY SYSTEM ═══ */
+// Gain/loss tables per brawler-trophy bracket
+// [minTrophies, gain, loss]
+const TROPHY_TABLE=[
+  [0,     8, 2],
+  [200,   7, 3],
+  [500,   7, 4],
+  [800,   6, 4],
+  [1100,  6, 5],
+  [1500,  5, 5],
+  [2000,  5, 6],  // Prestige 2 threshold
+  [2600,  4, 6],
+  [3300,  4, 7],
+  [4200,  3, 7],
+  [5500,  3, 8],
+  [7000,  2, 8],
+  [9000,  2, 9],
+  [12000, 1, 9],
+];
+const PRESTIGE2_THRESHOLD=2000; // per-brawler trophies
+
+function getTrophyRates(brawlerTrophies){
+  let gain=8,loss=2;
+  for(const [min,g,l] of TROPHY_TABLE){
+    if(brawlerTrophies>=min){gain=g;loss=l;}
+    else break;
+  }
+  return{gain,loss};
+}
+
+function isPrestige2(key){
+  return(SAVE.brawlerTrophies[key]||0)>=PRESTIGE2_THRESHOLD;
+}
+
 function awardTrophies(won,kills,gems){
-  const t=won?(10+kills*2+gems):(kills);
-  SAVE.trophies+=t;
-  if(!SAVE.brawlerTrophies[BD[SEL].key])SAVE.brawlerTrophies[BD[SEL].key]=0;
-  SAVE.brawlerTrophies[BD[SEL].key]+=t;
-  persist();return t;
+  const key=BD[SEL].key;
+  if(!SAVE.brawlerTrophies[key])SAVE.brawlerTrophies[key]=0;
+  if(!SAVE.winStreak[key])SAVE.winStreak[key]=0;
+  const bt=SAVE.brawlerTrophies[key];
+  const p2=isPrestige2(key);
+  const{gain,loss}=getTrophyRates(bt);
+
+  let delta=0;
+  let bonusLabel="";
+
+  if(MODE==="showdown"){
+    // Placement-based: rank 1=+8, 2=+5, 3=+3, 4=+1, 5=0, 6=-1, 7=-2, 8=-3, 9=-4, 10=-5
+    const sdGainTable=[8,5,3,1,0,-1,-2,-3,-4,-5];
+    const rank=Math.max(1,Math.min(10,SD_RANK||10));
+    delta=sdGainTable[rank-1];
+    // Scale delta by trophy rate modifier
+    const scl=Math.max(0.5,gain/8);
+    delta=delta>0?Math.round(delta*scl):Math.round(delta*(loss/5));
+    if(delta<0&&bt+delta<0)delta=-bt;
+    SAVE.winStreak[key]=delta>0?(SAVE.winStreak[key]||0)+1:0;
+  } else if(won){
+    delta=gain;
+    if(!p2){
+      SAVE.winStreak[key]=Math.min((SAVE.winStreak[key]||0)+1,5);
+      const streakBonus=Math.min(SAVE.winStreak[key]-1,3)*2;
+      if(streakBonus>0){delta+=streakBonus;bonusLabel=`🔥×${SAVE.winStreak[key]}`;}
+      const avgOpponent=bt*(0.9+Math.random()*0.4);
+      if(bt<avgOpponent-150&&bt<1500){delta+=2;bonusLabel+=" 🏹";}
+    }else{
+      SAVE.winStreak[key]=0;
+    }
+  }else{
+    delta=-loss;
+    SAVE.winStreak[key]=0;
+    if(bt+delta<0)delta=-bt;
+  }
+
+  SAVE.brawlerTrophies[key]=Math.max(0,bt+delta);
+  SAVE.trophies=Object.values(SAVE.brawlerTrophies).reduce((s,v)=>s+(v||0),0);
+  persist();
+  window._trophyStreakLabel=bonusLabel;
+  return delta;
 }
 
 /* ═══ RANK SYSTEM ═══ */
@@ -643,89 +915,101 @@ function getRankProgress(trophies){
 // ═══ BRAWLER CLASS SYSTEM ═══════════════════════════════════════════
 const CLASS={
   damage_dealer:{
-    key:"damage_dealer",name:"Damage Dealer",nameDE:"Schaden",
-    icon:"⚔",short:"Schaden",
+    key:"damage_dealer",name:"Damage Dealer",nameDE:"Damage-Dealer/-in",
+    iconKey:"fist",short:"Damage",
     color:"#FF5533",glow:"#FF8855",
-    desc:"Hoher Schaden, viel HP. Stark gegen Tanks & Assassinen.",
+    desc:"Diese Brawler hauen ordentlich rein! Sie teilen viel Schaden aus und haben eine große Anzahl Trefferpunkte.",
+    descShort:"Viel Schaden & HP. Stark gegen Tanks & Assassinen.",
     strong:["tank","assassin"],weak:["marksman","artillery"],
-    tip:"Deal massive damage up close or at mid range.",
+    tip:"Sie sind stark gegen Tanks und Assassinen, jedoch schwach gegen Schützen und Artilleriebrawler.",
   },
   assassin:{
     key:"assassin",name:"Assassin",nameDE:"Assassine",
-    icon:"🗡",short:"Assassin",
+    iconKey:"sword",short:"Assassin",
     color:"#AA33FF",glow:"#CC77FF",
-    desc:"Blitzschnell, wenig HP. Stark gegen Fernkämpfer & Artillerie.",
+    desc:"Diese Brawler können zu ihrem Ziel schnellen. Durch ihre geringen Trefferpunkte müssen sie sich jedoch auf ihre Fähigkeiten verlassen, um brenzlige Situationen zu überleben.",
+    descShort:"Blitzschnell, wenig HP. Stark gegen Schützen & Artillerie.",
     strong:["marksman","artillery"],weak:["tank","damage_dealer"],
-    tip:"Close the gap fast. Avoid tanks and damage dealers.",
+    tip:"Sie sind stark gegen Schützen und Artillerie, jedoch schwach gegen Tanks und Damage-Dealer.",
   },
   marksman:{
-    key:"marksman",name:"Marksman",nameDE:"Scharfschütze",
-    icon:"🎯",short:"Sniper",
+    key:"marksman",name:"Marksman",nameDE:"Schütze/Schützin",
+    iconKey:"crosshair",short:"Schütze/-in",
     color:"#00CCFF",glow:"#66EEFF",
-    desc:"Präzise auf Distanz. Schwach gegen Assassinen & Artillerie.",
+    desc:"Diese Brawler teilen aus der Ferne Schaden aus! Am effektivsten sind sie, wenn zwischen ihnen und ihren Feinden eine ordentliche Distanz liegt.",
+    descShort:"Präzise auf Distanz. Im Fernkampf stark gegen die meisten Klassen.",
     strong:["damage_dealer","support","controller"],weak:["assassin","artillery"],
-    tip:"Stay at range. Assassins will close in fast.",
+    tip:"Im Fernkampf stark gegen die meisten Klassen. Kommen Assassinen oder Artillerie zu nah, gilt es die Schützen zu schützen.",
   },
   artillery:{
     key:"artillery",name:"Artillery",nameDE:"Artillerie",
-    icon:"💣",short:"Artill.",
+    iconKey:"bomb",short:"Artillerie",
     color:"#FF9900",glow:"#FFCC44",
-    desc:"Schießt über Hindernisse. Schwach gegen Tanks & Assassinen.",
+    desc:"Diese Brawler können Projektile über Hindernisse schleudern – hat jemand eine Luftpost voller Schmerzen bestellt?",
+    descShort:"Schießt über Hindernisse. Schwach gegen Tanks & Assassinen.",
     strong:["controller","support","marksman"],weak:["tank","assassin"],
-    tip:"Use walls as cover. Watch out for tanks rushing in.",
+    tip:"Sie sind stark gegen Feinde in Deckung, aber schwach gegen Tanks und Assassinen.",
   },
   tank:{
     key:"tank",name:"Tank",nameDE:"Tank",
-    icon:"🛡",short:"Tank",
+    iconKey:"shield",short:"Tank",
     color:"#FF3355",glow:"#FF7788",
-    desc:"Massig HP. Dominiert Nahkampf, schwach gegen Damage Dealer.",
+    desc:"Diese Brawler haben viele Trefferpunkte und halten so eine ganze Menge aus.",
+    descShort:"Viele HP. Stark im Nahkampf, bes. gegen Assassinen.",
     strong:["assassin","artillery","support"],weak:["damage_dealer"],
-    tip:"Absorb damage for your team. Rush support and artillery.",
+    tip:"Sie sind stark im Nahkampf, besonders gegen Assassinen, aber schwach gegen Damage-Dealer.",
   },
   support:{
-    key:"support",name:"Support",nameDE:"Support",
-    icon:"💚",short:"Support",
+    key:"support",name:"Support",nameDE:"Unterstützer",
+    iconKey:"plus",short:"Support",
     color:"#44FF88",glow:"#88FFAA",
-    desc:"Heilt & bufft. Schwach gegen fast alle Klassen allein.",
+    desc:"Diese Kämpfer sind ein Fels in der Brawlndung! Ihre Fähigkeiten heilen Mitspieler oder verstärken sie, wodurch sie ihrem Team zum Sieg verhelfen.",
+    descShort:"Heilt & bufft. Perfekt für Teams.",
     strong:["controller"],weak:["damage_dealer","assassin","marksman","tank"],
-    tip:"Stay behind your team. Your heals turn the tide.",
+    tip:"Damage-Dealer, Assassinen, Schützen und Tanks bereiten ihnen jedoch so einige Probleme.",
   },
   controller:{
-    key:"controller",name:"Controller",nameDE:"Controller",
-    icon:"🌀",short:"Control",
+    key:"controller",name:"Controller",nameDE:"Kontrollbrawler",
+    iconKey:"hotspot",short:"Kontrolle",
     color:"#4499FF",glow:"#88CCFF",
-    desc:"Dominiert Flächen. Kann Einzelduellen unterlegen sein.",
+    desc:"Mit diesen Brawlern können Maps dominiert werden. Mit ihren Flächenangriffen können sie einen Bereich einnehmen und kontrollieren!",
+    descShort:"Dominiert Flächen. Schwach in 1-gegen-1.",
     strong:["support","damage_dealer"],weak:["assassin","tank"],
-    tip:"Control the map with area attacks. Avoid 1v1 duels.",
+    tip:"Sie sind stark gegen Gegner mit schlechter Positionierung, schwächeln jedoch in 1-gegen-1-Konfrontationen.",
   },
 };
 
 // ── Class assignment per brawler (matches stats + lore) ─────────────
 const BRAWLER_CLASS={
-  SHELLY:  "damage_dealer",  // balanced shotgun, decent hp
-  COLT:    "marksman",       // rapid precision rifle
-  BULL:    "tank",           // massive hp, close-range shotgun
-  BROCK:   "marksman",       // long-range rockets, high range
-  DYNA:    "artillery",      // bombs over walls
-  PIPER:   "marksman",       // long-range sniper
-  POCO:    "support",        // heals while damaging
-  ROSA:    "tank",           // armored, defensive
-  LEON:    "assassin",       // speedy blades + stealth
-  SPIKE:   "damage_dealer",  // multi-spike high damage
-  TARA:    "controller",     // gravity pull area control
-  FRANK:   "tank",           // massive hp shockwave
-  MORTIS:  "assassin",       // dash scythe lifesteal
-  JACKY:   "damage_dealer",  // jackhammer high damage
-  EMZ:     "controller",     // hairspray dome area
-  CROW:    "assassin",       // poisoned daggers fast
-  SANDY:   "controller",     // sandstorm sleep area
-  LILY:    "assassin",       // blink teleport assassin
-  BIBI:    "damage_dealer",  // baseball bat melee power
-  PAM:     "support",        // healing turret station
-  TICK:    "artillery",      // mine traps over ground
-  GENE:    "support",        // heals and grabs
-  MAX:     "support",        // speed boost aura
-  MR_P:    "controller",     // porter minions area
+  SHELLY:  "damage_dealer",  // offiziell: Damage Dealer
+  COLT:    "damage_dealer",  // offiziell: Damage Dealer
+  BULL:    "tank",           // offiziell: Tank
+  BROCK:   "marksman",      // offiziell: Marksman
+  DYNA:    "artillery",     // offiziell: Artillery
+  PIPER:   "marksman",      // offiziell: Marksman
+  POCO:    "support",       // offiziell: Support
+  ROSA:    "tank",          // offiziell: Tank
+  LEON:    "assassin",      // offiziell: Assassin
+  SPIKE:   "damage_dealer", // offiziell: Damage Dealer
+  TARA:    "damage_dealer", // offiziell: Damage Dealer
+  FRANK:   "tank",          // offiziell: Tank
+  MORTIS:  "assassin",      // offiziell: Assassin
+  JACKY:   "tank",          // offiziell: Tank
+  EL_PRIMO:"tank",          // offiziell: Tank
+  EMZ:     "controller",    // offiziell: Controller
+  CROW:    "assassin",      // offiziell: Assassin
+  SANDY:   "controller",    // offiziell: Controller
+  LILY:    "assassin",      // offiziell: Assassin
+  BIBI:    "tank",          // offiziell: Tank
+  PAM:     "support",       // offiziell: Support
+  TICK:    "artillery",     // offiziell: Artillery
+  GENE:    "support",       // offiziell: Support (Controller im Wiki, hier Support)
+  MAX:     "support",       // offiziell: Support
+  MR_P:    "controller",    // offiziell: Controller
+  NITA:    "damage_dealer", // offiziell: Damage Dealer
+  COLETTE: "damage_dealer", // offiziell: Damage Dealer
+  EDGAR:   "assassin",      // offiziell: Assassin
+  LOLA:    "damage_dealer", // offiziell: Damage Dealer
 };
 
 function getBrawlerClass(bd){
@@ -733,6 +1017,111 @@ function getBrawlerClass(bd){
 }
 function getBrawlerClassKey(bd){
   return BRAWLER_CLASS[bd.key]||"damage_dealer";
+}
+
+// ── Draw a class icon as canvas paths (no emoji) ──
+// cx,cy = center, sz = size (diameter), col = fill color
+function drawClassIcon(iconKey,cx,cy,sz,col){
+  X.save();
+  X.translate(cx,cy);
+  const s=sz/20; // base unit
+  X.fillStyle=col||"#FFF";
+  X.strokeStyle=col||"#FFF";
+  X.lineCap="round";X.lineJoin="round";
+
+  if(iconKey==="fist"){
+    // Faust: vier Finger + Daumen
+    X.lineWidth=s*2.2;
+    // Knuckles (vier Finger-Kuppen)
+    for(let i=0;i<4;i++){
+      const kx=(i-1.5)*s*3.2,ky=-s*7;
+      X.beginPath();X.arc(kx,ky,s*2.2,0,Math.PI*2);X.fill();
+    }
+    // Handrücken
+    X.beginPath();
+    X.roundRect(-s*7,-s*5,s*14,s*10,s*2);
+    X.fill();
+    // Daumen links
+    X.beginPath();X.arc(-s*8,-s*1,s*2.2,0,Math.PI*2);X.fill();
+    X.beginPath();X.arc(-s*10,s*2.5,s*2,0,Math.PI*2);X.fill();
+  }
+  else if(iconKey==="sword"){
+    // Schwert: Klinge, Parierstange, Griff
+    X.lineWidth=s*2;
+    // Klinge
+    X.beginPath();X.moveTo(0,-s*9);X.lineTo(s*1.5,s*2);X.lineTo(-s*1.5,s*2);X.closePath();X.fill();
+    // Parierstange
+    X.fillRect(-s*5,s*2,s*10,s*2.5);
+    // Griff
+    X.fillRect(-s*1.2,s*4.5,s*2.4,s*5);
+    // Knauf
+    X.beginPath();X.arc(0,s*9.5,s*2,0,Math.PI*2);X.fill();
+  }
+  else if(iconKey==="crosshair"){
+    // Zielscheibe: Kreis + 4 Striche
+    X.lineWidth=s*1.8;
+    X.beginPath();X.arc(0,0,s*6,0,Math.PI*2);X.stroke();
+    // 4 Striche außen
+    const dirs=[[0,-1],[0,1],[1,0],[-1,0]];
+    for(const[dx,dy] of dirs){
+      X.beginPath();X.moveTo(dx*s*7.5,dy*s*7.5);X.lineTo(dx*s*10,dy*s*10);X.stroke();
+    }
+    // Kleiner Mittelpunkt
+    X.beginPath();X.arc(0,0,s*1.5,0,Math.PI*2);X.fill();
+  }
+  else if(iconKey==="bomb"){
+    // Bombe: runder Körper + Zündschnur + Funken
+    // Körper
+    X.beginPath();X.arc(0,s*2,s*7,0,Math.PI*2);X.fill();
+    // Zündschnur (Kurve)
+    X.lineWidth=s*1.8;
+    X.strokeStyle=col||"#FFF";
+    X.beginPath();X.moveTo(s*3.5,-s*4);X.quadraticCurveTo(s*8,-s*10,s*2,-s*9);X.stroke();
+    // Funken oben
+    X.lineWidth=s*1.4;
+    const sparks=[[s*1,-s*10],[s*3,-s*11],[-s*1,-s*9]];
+    for(const[sx2,sy2] of sparks){X.beginPath();X.moveTo(sx2,sy2);X.lineTo(sx2+s*1.2,sy2-s*2);X.stroke();}
+    // Glanzpunkt auf Bombe
+    X.fillStyle="rgba(255,255,255,0.3)";X.beginPath();X.arc(-s*2.5,s*0,s*2.5,0,Math.PI*2);X.fill();
+  }
+  else if(iconKey==="shield"){
+    // Schild: Wappenform
+    X.beginPath();
+    X.moveTo(0,-s*9);
+    X.lineTo(s*7,-s*6);
+    X.lineTo(s*7,s*1);
+    X.quadraticCurveTo(s*7,s*8,0,s*10);
+    X.quadraticCurveTo(-s*7,s*8,-s*7,s*1);
+    X.lineTo(-s*7,-s*6);
+    X.closePath();X.fill();
+    // Inneres Kreuz / Highlight
+    X.fillStyle="rgba(255,255,255,0.2)";
+    X.beginPath();
+    X.moveTo(0,-s*7);X.lineTo(s*5,-s*4.5);X.lineTo(s*5,s*0.5);
+    X.quadraticCurveTo(s*5,s*5,0,s*7.5);X.closePath();X.fill();
+  }
+  else if(iconKey==="plus"){
+    // Pluszeichen (Arzt/Heilen)
+    const arm=s*4,thick=s*3;
+    X.beginPath();
+    X.roundRect(-thick,-s*9,thick*2,s*18,s*1.5);X.fill();
+    X.beginPath();
+    X.roundRect(-s*9,-thick,s*18,thick*2,s*1.5);X.fill();
+  }
+  else if(iconKey==="hotspot"){
+    // Hotspot/WLAN-Symbol: 3 Bögen + Punkt
+    X.lineWidth=s*2;
+    X.strokeStyle=col||"#FFF";
+    // 3 konzentrische Bögen (Halbkreise nach oben)
+    for(let i=0;i<3;i++){
+      const r=(i+1)*s*3.2;
+      X.beginPath();X.arc(0,s*3,r,Math.PI+0.35,Math.PI*2-0.35);X.stroke();
+    }
+    // Mittelpunkt
+    X.beginPath();X.arc(0,s*3,s*1.5,0,Math.PI*2);X.fill();
+  }
+
+  X.restore();
 }
 
 const RARITY={
@@ -1333,6 +1722,9 @@ const BD=[
   {key:"EDGAR",  name:"Edgar",    rarity:"SUPER_RARE",     color:"#8888FF",dark:"#2222AA",body:"#6666EE", hp:3800,spd:225,ammoMax:3,ammoR:1.2,sCool:.50,wType:"blades",  dmg:800, rLife:0.9, desc:"Heals on each hit, super always ready",sHp:2,sSp:4,sDm:4,sRg:1, superDesc:"Leap and lifesteal dash"},
   {key:"LOLA",   name:"Lola",     rarity:"EPIC",           color:"#FF66CC",dark:"#AA2288",body:"#EE44AA", hp:3600,spd:210,ammoMax:3,ammoR:1.3,sCool:.60,wType:"rifle",   dmg:620, rLife:1.8, desc:"Ego clone mirrors her attacks",        sHp:2,sSp:3,sDm:3,sRg:3, superDesc:"Deploy Ego mirror clone"},
 ];
+// Sort by rarity: COMMON → RARE → SUPER_RARE → EPIC → MYTHIC → LEGENDARY
+const _RARITY_RANK={COMMON:0,RARE:1,SUPER_RARE:2,EPIC:3,MYTHIC:4,LEGENDARY:5};
+BD.sort((a,b)=>(_RARITY_RANK[a.rarity]||0)-(_RARITY_RANK[b.rarity]||0));
 let SEL=0;
 
 /* CUSTOM BRAWLER SYSTEM — max 3 slots, saved in localStorage */
@@ -1480,6 +1872,10 @@ C.addEventListener("touchend",e=>{
     // ── Non-play state UI buttons ──
     if(STATE==="home")    {
       if(SHOW_BRAWLERS){handleBrawlerCollectionClick(x,y);continue}
+      if(SHOW_NEWS){
+        if(x<60&&y<(drawNewsScreen._topH||52)){SHOW_NEWS=false;snd("select");}
+        continue;
+      }
       handleHomeTap(x,y);continue
     }
     if(STATE==="shop")    {handleShopClick(x,y);continue}
@@ -1489,6 +1885,7 @@ C.addEventListener("touchend",e=>{
     if(STATE==="select"){handleSelectTap(x,y);continue}
     if(STATE==="settings"){handleSettingsClick(x,y);continue}
     if(STATE==="win"||STATE==="lose"){handleEndClick(x,y);continue}
+    if(STATE==="starrdrop"){handleStarrDropClick();continue}
     // ── In-game gear icon ──
     if(STATE==="play"&&Math.hypot(_sxy.x-(W-22),_sxy.y-22)<22){
       SETTINGS_FROM="play";STATE="settings";snd("select");continue;
@@ -1530,6 +1927,10 @@ C.addEventListener("click",e=>{
   getAC();
   if(STATE==="home"){
     if(SHOW_BRAWLERS){handleBrawlerCollectionClick(x,y);return}
+    if(SHOW_NEWS){
+      if(x<60&&y<(drawNewsScreen._topH||52)){SHOW_NEWS=false;snd("select");return}
+      return;
+    }
     handleHomeTap(x,y);
   }
   else if(STATE==="shop")handleShopClick(x,y);
@@ -1539,6 +1940,7 @@ C.addEventListener("click",e=>{
   else if(STATE==="select")handleSelectTap(x,y);
   else if(STATE==="settings")handleSettingsClick(x,y);
   else if(STATE==="win"||STATE==="lose"){handleEndClick(x,y)}
+  else if(STATE==="starrdrop"){handleStarrDropClick()}
   else if(STATE==="play"){
     // Gear icon in-game
     if(Math.hypot(x-(W-22),y-22)<20){SETTINGS_FROM="play";STATE="settings";snd("select")}
@@ -1640,6 +2042,7 @@ function handleHomeTap(x,y){
     if(x>=10&&x<=118&&y>=btn.y&&y<=btn.y+70){
       if(btn.label==="BRAWLERS"){SHOW_BRAWLERS=true;BRAWLER_SEL=SEL;BRAWLER_SCROLL=0;snd("select")}
       else if(btn.label==="SHOP"){STATE="shop";snd("select")}
+      else if(btn.label==="NEWS"){SHOW_NEWS=true;NEWS_SCROLL=0;snd("select")}
       else snd("select");return;
     }
   }
@@ -1699,6 +2102,8 @@ function drawHomeScreen(){
   const bgGr=X.createLinearGradient(0,0,0,H);
   bgGr.addColorStop(0,"#3EC8F0");bgGr.addColorStop(0.5,"#2AB0E8");bgGr.addColorStop(1,"#1890C8");
   X.fillStyle=bgGr;X.fillRect(0,0,W,H);
+  // Floating skulls in background
+  drawSkulls();
   // Subtle radial center glow
   const cGl=X.createRadialGradient(W/2,H*.45,50,W/2,H*.45,320);
   cGl.addColorStop(0,"rgba(255,255,255,.18)");cGl.addColorStop(1,"transparent");
@@ -1979,6 +2384,10 @@ function handleSelectTap(x,y){
 }
 function handleEndClick(x,y){
   const bY=END.bY;
+  // If player has drops, clicking the drop notification opens the drop screen
+  if(window._gotDrop&&SAVE.starrDrops>0&&Math.abs(x-W/2)<160&&y>END.pany+220&&y<END.pany+260){
+    window._gotDrop=false;startStarrDropScreen("home");return;
+  }
   if(Math.abs(x-(W/2-120))<92&&Math.abs(y-bY)<25){snd("select");init();return}
   if(Math.abs(x-(W/2+120))<92&&Math.abs(y-bY)<25){snd("select");STATE="home";return}
 }
@@ -1989,11 +2398,136 @@ let MM_T=0;          // matchmaking timer
 let MM_PHASE=0;      // 0=searching, 1=found, 2=loading
 let MM_PLAYERS=[];   // fake opponent slots
 let MM_DOTS=0;       // animated dots counter
+let MM_LINEUP=null;  // pre-generated brawler lineup {allies, enemies, redDef, redAtt, bots}
 let CAM_X=0,CAM_Y=0; // camera top-left in world coords
 let SHOW_SELECT=false,SEL_OVERLAY_Y=800; // brawler overlay slide-in
 let SHOW_BRAWLERS=false;   // Brawler Collection screen (from BRAWLERS button)
 let BRAWLER_SEL=0;         // selected brawler in collection
 let BRAWLER_SCROLL=0;
+let SHOW_NEWS=false;       // News overlay
+let NEWS_SCROLL=0;
+
+/* ═══ FLOATING SKULLS (Home BG) ═══ */
+const SKULLS=(()=>{
+  const arr=[];
+  for(let i=0;i<28;i++){
+    arr.push({
+      x:Math.random()*1280,y:Math.random()*720,
+      vx:(Math.random()-.5)*12,vy:(Math.random()-.5)*8,
+      size:18+Math.random()*38,alpha:0.04+Math.random()*0.10,
+      rot:Math.random()*Math.PI*2,rotV:(Math.random()-.5)*0.008,
+      phase:Math.random()*Math.PI*2,
+    });
+  }
+  return arr;
+})();
+function updateSkulls(){
+  for(const s of SKULLS){
+    s.x+=s.vx*DT;s.y+=s.vy*DT;s.rot+=s.rotV;
+    if(s.x<-60)s.x=W+40; if(s.x>W+60)s.x=-40;
+    if(s.y<-60)s.y=H+40; if(s.y>H+60)s.y=-40;
+  }
+}
+function drawSkulls(){
+  X.save();
+  for(const s of SKULLS){
+    X.save();
+    X.globalAlpha=s.alpha*(0.7+0.3*Math.sin(T*0.6+s.phase));
+    X.translate(s.x,s.y);X.rotate(s.rot);
+    const sz=s.size;
+    X.fillStyle="#FFFFFF";
+    X.beginPath();X.arc(0,-sz*.18,sz*.42,0,Math.PI*2);X.fill();
+    X.beginPath();X.moveTo(-sz*.28,sz*.05);
+    X.quadraticCurveTo(-sz*.32,sz*.38,0,sz*.38);
+    X.quadraticCurveTo(sz*.32,sz*.38,sz*.28,sz*.05);
+    X.closePath();X.fill();
+    X.fillStyle="rgba(10,0,30,0.85)";
+    X.beginPath();X.ellipse(-sz*.14,-sz*.2,sz*.11,sz*.13,0,0,Math.PI*2);X.fill();
+    X.beginPath();X.ellipse(sz*.14,-sz*.2,sz*.11,sz*.13,0,0,Math.PI*2);X.fill();
+    X.beginPath();X.ellipse(0,sz*.04,sz*.05,sz*.07,0,0,Math.PI*2);X.fill();
+    X.fillStyle="rgba(10,0,30,0.6)";
+    for(let t=0;t<4;t++){const tx=(t-1.5)*sz*.13;X.fillRect(tx,sz*.18,sz*.09,sz*.12);}
+    X.restore();
+  }
+  X.restore();
+}
+
+/* ═══ NEWS DATA ═══ */
+const NEWS_ARTICLES=[
+  {id:1,tag:"UPDATE",tagColor:"#FF8800",title:"Brawl Rush v7 ist da!",date:"26. März 2026",img:"🎮",imgColor:"#FF8800",
+   body:"Das große Update ist live! Klassen-System, Brawler-Porträts, Matchmaking und vieles mehr. Alle Brawler haben jetzt ihre offiziellen Klassen aus dem Brawl Stars Wiki."},
+  {id:2,tag:"NEU",tagColor:"#44FF88",title:"Klassen-System eingeführt",date:"26. März 2026",img:"⚔",imgColor:"#FF5533",
+   body:"7 Klassen: Damage-Dealer/-in, Assassine, Schütze/Schützin, Artillerie, Tank, Unterstützer und Kontrollbrawler. Jede Klasse hat eigene Stärken und Schwächen!"},
+  {id:3,tag:"TIPP",tagColor:"#00CCFF",title:"Klassen im Kampf nutzen",date:"25. März 2026",img:"🎯",imgColor:"#00CCFF",
+   body:"Nutze die Klassenstärken strategisch: Schicke Tanks voraus, lass Schützen aus sicherer Distanz angreifen und halte Unterstützer im Hintergrund. Assassinen erledigen geschwächte Gegner perfekt."},
+  {id:4,tag:"EVENT",tagColor:"#AA33FF",title:"Doppelte Trophäen am Wochenende",date:"24. März 2026",img:"🏆",imgColor:"#FFD700",
+   body:"Dieses Wochenende gibt es doppelte Trophäen für alle gewonnenen Matches! Nutze die Chance um schnell aufzusteigen und neue Ränge zu erreichen."},
+  {id:5,tag:"GUIDE",tagColor:"#FF3355",title:"Brawl Pass Guide",date:"22. März 2026",img:"🎫",imgColor:"#FF8800",
+   body:"Der Brawl Pass hat 70 Stufen und bietet auf jedem Tier Belohnungen. Mit dem Premium Pass erhältst du exklusive Brawler, Skins und deutlich mehr Ressourcen. Jeder Sieg bringt XP!"},
+  {id:6,tag:"INFO",tagColor:"#4499FF",title:"Starr Drops erklärt",date:"20. März 2026",img:"📦",imgColor:"#FF44AA",
+   body:"Starr Drops beginnen als Selten und können durch Antippen verbessert werden. Je höher die Seltenheit, desto bessere Belohnungen: Gadgets, Sternkräfte und sogar Brawler warten!"},
+];
+
+function drawNewsScreen(){
+  const bg=X.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,"#0E1A2E");bg.addColorStop(1,"#060D18");
+  X.fillStyle=bg;X.fillRect(0,0,W,H);
+  X.globalAlpha=0.07;
+  for(let i=0;i<30;i++){const sx=(Math.sin(i*137.5)*.5+.5)*W,sy=(Math.cos(i*97.3)*.5+.5)*H;X.fillStyle="#88BBFF";X.beginPath();X.arc(sx,sy,.8+Math.sin(T*.8+i)*.5,0,6.28);X.fill();}
+  X.globalAlpha=1;
+  const topH=52;
+  X.fillStyle="rgba(0,10,30,.95)";X.fillRect(0,0,W,topH);
+  X.strokeStyle="rgba(100,160,255,.25)";X.lineWidth=1.5;X.beginPath();X.moveTo(0,topH);X.lineTo(W,topH);X.stroke();
+  X.fillStyle="rgba(255,255,255,.15)";rr(8,10,44,32,16);X.fill();
+  X.fillStyle="#FFF";X.font='bold 22px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText("‹",30,topH/2);
+  gl("#4499FF",12);X.fillStyle="#4499FF";X.font='bold 22px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.strokeStyle="rgba(0,0,0,.8)";X.lineWidth=3;X.strokeText("📰 NEWS",W/2,topH/2);X.fillText("📰 NEWS",W/2,topH/2);ng();
+  const cardX=24,cardW=W-48,cardH=148,gap=14,gridY=topH+12;
+  const totalH=NEWS_ARTICLES.length*(cardH+gap)-gap;
+  const maxScroll=Math.max(0,totalH-(H-gridY-8));
+  NEWS_SCROLL=Math.max(0,Math.min(NEWS_SCROLL,maxScroll));
+  drawNewsScreen._maxScroll=maxScroll;drawNewsScreen._topH=topH;
+  X.save();X.beginPath();X.rect(0,gridY,W,H-gridY-8);X.clip();
+  NEWS_ARTICLES.forEach((art,i)=>{
+    const cy=gridY+i*(cardH+gap)-NEWS_SCROLL;
+    if(cy+cardH<gridY-10||cy>H+10)return;
+    const cg=X.createLinearGradient(cardX,cy,cardX,cy+cardH);
+    cg.addColorStop(0,"rgba(20,30,55,.97)");cg.addColorStop(1,"rgba(10,15,30,.97)");
+    X.fillStyle=cg;rr(cardX,cy,cardW,cardH,16);X.fill();
+    X.strokeStyle="rgba(80,120,200,.3)";X.lineWidth=1.5;rr(cardX,cy,cardW,cardH,16);X.stroke();
+    X.fillStyle=art.tagColor;rr(cardX,cy,5,cardH,3);X.fill();
+    X.fillStyle="rgba(255,255,255,.04)";rr(cardX+5,cy+2,cardW-5,cardH*.35,14);X.fill();
+    const icX=cardX+50,icY=cy+cardH/2;
+    const icGr=X.createRadialGradient(icX-8,icY-8,4,icX,icY,32);
+    icGr.addColorStop(0,ca(art.imgColor,"55"));icGr.addColorStop(1,ca(art.imgColor,"22"));
+    X.fillStyle=icGr;X.beginPath();X.arc(icX,icY,32,0,6.28);X.fill();
+    X.strokeStyle=ca(art.imgColor,"88");X.lineWidth=2;X.beginPath();X.arc(icX,icY,32,0,6.28);X.stroke();
+    X.font='28px serif';X.textAlign="center";X.textBaseline="middle";X.fillText(art.img,icX,icY);
+    const tagX=cardX+90,tagY=cy+20;
+    X.fillStyle=ca(art.tagColor,"33");rr(tagX,tagY,52,18,9);X.fill();
+    X.strokeStyle=ca(art.tagColor,"AA");X.lineWidth=1;rr(tagX,tagY,52,18,9);X.stroke();
+    X.fillStyle=art.tagColor;X.font='bold 8px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText(art.tag,tagX+26,tagY+9);
+    X.fillStyle="rgba(140,150,180,.6)";X.font='bold 8px "Lilita One"';X.textAlign="right";X.textBaseline="middle";X.fillText(art.date,cardX+cardW-16,tagY+9);
+    gl(art.tagColor,4);X.fillStyle="#FFF";X.font='bold 15px "Lilita One"';X.textAlign="left";X.textBaseline="middle";
+    X.fillText(art.title,tagX,cy+50);ng();
+    X.fillStyle="rgba(180,185,210,.75)";X.font='bold 9px "Lilita One"';X.textAlign="left";X.textBaseline="top";
+    const words=art.body.split(" ");let line="",lineY=cy+68;
+    for(const w of words){
+      const t2=line?line+" "+w:w;
+      if(X.measureText(t2).width>cardW-106){X.fillText(line,tagX,lineY);lineY+=13;line=w;}
+      else line=t2;
+      if(lineY>cy+cardH-14)break;
+    }
+    if(line&&lineY<=cy+cardH-14)X.fillText(line,tagX,lineY);
+  });
+  X.restore();
+  if(maxScroll>0){
+    const sbH=Math.max(30,((H-gridY-8)/totalH)*(H-gridY-8));
+    const sbY=gridY+(NEWS_SCROLL/maxScroll)*(H-gridY-8-sbH);
+    X.fillStyle="rgba(255,255,255,.08)";rr(W-8,gridY,5,H-gridY-8,3);X.fill();
+    X.fillStyle="rgba(100,160,255,.5)";rr(W-8,sbY,5,sbH,3);X.fill();
+  }
+}
 let SETTINGS_FROM="select";
 let END_SHOW_T=0;
 let MODE="gems"; // "gems" | "knockout"
@@ -2083,10 +2617,17 @@ function spawnBushes(){
 
 function mkEnemy(x,y,key,type,hp,spd){
   const bd=BD.find(b=>b.key===key)||BD[0];
+  // Scale difficulty by player's brawler trophies (capped at 3× harder)
+  const bt=SAVE.brawlerTrophies[BD[SEL]?.key]||0;
+  const diff=Math.min(1+bt/4000,3.0); // 1.0 at 0 trophies → 3.0 at 8000+
+  const spdScaled=Math.round(spd*(1+bt/8000*0.5)); // up to +50% speed
+  const sCool=Math.max(0.7,1.5+Math.random()*.8-bt/3000*0.5); // faster fire rate
   return{x,y,vx:0,vy:0,r:21,color:bd.color,dark:bd.dark,body:bd.body,name:bd.name,
-    type,hp,maxHp:hp,spd,sTimer:Math.random()*2,sCool:1.5+Math.random()*.8,
-    supTimer:0,supCool:8+Math.random()*4,dead:false,angle:0,invT:0,deathT:0,walkT:0,strDir:1,strT:1,flashT:0,
-    team:1,gems:0,powerups:0};
+    type,hp:Math.round(hp*diff),maxHp:Math.round(hp*diff),spd:spdScaled,
+    sTimer:Math.random()*1.2,sCool,
+    supTimer:0,supCool:Math.max(5,8+Math.random()*4-bt/2000),
+    dead:false,angle:0,invT:0,deathT:0,walkT:0,strDir:1,strT:1,flashT:0,
+    team:1,gems:0,powerups:0,_diff:diff};
 }
 const WAVES=[
   // Wave 1 – four corners of the expanded map
@@ -2144,23 +2685,28 @@ function init(){
     HS_BLUE={hp:blueHP,maxHp:blueHP,x:120,y:504,r:38,invT:0,shakeT:0,pushT:0,lastPct:1};
     HS_RED ={hp:redHP, maxHp:redHP, x:1416,y:504,r:38,invT:0,shakeT:0,pushT:0,lastPct:1};
     HS_TIMER=180;HS_DRAW=false;
-    const eTeam=["BULL","TARA","BROCK"],eTypes=["tank","aggressive","shooter"];
+    const _heistPool=MM_LINEUP?.enemies?.length?MM_LINEUP.enemies:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);
+    const eTeam=[_heistPool[0]||"BULL",_heistPool[1]||"TARA",_heistPool[2]||"BROCK"];
+    const _eTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"shooter",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive"};
+    const eTypes=eTeam.map(k=>_eTypeMap[k]||"shooter");
     const eSpawns=[[1320,408],[1320,456],[1368,504]];
     ENM=[];
     for(let i=0;i<3;i++){const e=mkEnemy(eSpawns[i][0],eSpawns[i][1],eTeam[i],eTypes[i],3000+i*400,92+i*8);e.team=1;ENM.push(e);}
-    const fKeys=["POCO","COLT"],fSpawns=[[216,456],[408,600]];
+    const _allPool=MM_LINEUP?.allies?.length?MM_LINEUP.allies:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);const _fPool=[..._allPool].sort(()=>Math.random()-.5);const fKeys=[_fPool[0]||"POCO",_fPool[1]||"COLT"],fSpawns=[[216,456],[408,600]];
     for(let i=0;i<2;i++){const a=mkEnemy(fSpawns[i][0],fSpawns[i][1],fKeys[i],"agile",3500,100);a.team=0;a.friendly=true;ENM.push(a);}
     PL.x=360;PL.y=552;
     GEM=[];
   } else
   // Gem Grab / Knockout: set up 2 teams of 3
   if(MODE==="gems"||MODE==="knockout"){
-    const allies=["COLT","POCO"],enemies=["BULL","TARA","BROCK","FRANK","LEON","DYNA"];
-    const eTeam=enemies.slice(0,5);
-    const eTypes=["tank","aggressive","shooter","tank","agile"];
+    const _ggEPool=MM_LINEUP?.enemies?.length?MM_LINEUP.enemies:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);
+    const _ggTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"shooter",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive"};
+    const eTeam=_ggEPool.slice(0,5);
+    const eTypes=eTeam.map(k=>_ggTypeMap[k]||"shooter");
     const eSpawns=[[TS*8+TS/2,TS*4+TS/2],[TS*24+TS/2,TS*4+TS/2],[TS*16+TS/2,TS*3+TS/2],[TS*6+TS/2,TS*8+TS/2],[TS*26+TS/2,TS*8+TS/2]];
     // 2 red-team allies (fight alongside player)
-    const friendlyKeys=["POCO","COLT"];
+    const _ggAllyPool=MM_LINEUP?.allies?.length?MM_LINEUP.allies:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);
+    const friendlyKeys=[_ggAllyPool[0]||"POCO",_ggAllyPool[1]||"COLT"];
     const friendlySpawns=[[TS*13+TS/2,TS*10+TS/2],[TS*19+TS/2,TS*10+TS/2]];
     ENM=[];
     // Red enemies (3)
@@ -2176,8 +2722,9 @@ function init(){
     const _mW=COLS*TS,_mH=ROWS*TS;
     SD_POISON_MAX=Math.sqrt((_mW/2)*(_mW/2)+(_mH/2)*(_mH/2))*1.05;
     SD_POISON_R=SD_POISON_MAX;SD_POISON_SPEED=SD_POISON_MAX/120;
-    const bk=["BULL","COLT","LEON","TARA","DYNA","BROCK","POCO","FRANK","PIPER"];
-    const bt=["tank","shooter","agile","aggressive","mortar","shooter","agile","tank","shooter"];
+    const _sdTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"mortar",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive",SHELLY:"shooter",SPIKE:"shooter",POCO:"agile",SANDY:"aggressive",BIBI:"aggressive",GENE:"shooter",EMZ:"shooter",MR_P:"shooter",NITA:"tank",PAM:"shooter",LILY:"agile",LOLA:"aggressive",COLETTE:"shooter"};
+    const bk=MM_LINEUP?.bots?.length?MM_LINEUP.bots:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5).slice(0,9);
+    const bt=bk.map(k=>_sdTypeMap[k]||"shooter");
     const sp=[[13,11],[7,2],[23,2],[1,18],[20,18],[11,10],[30,10],[19,17],[15,2],[3,10]];
     ENM=[];
     for(let i=0;i<9;i++){const[sc,sr]=sp[i+1];const bot=mkEnemy(TS*sc+TS/2,TS*sr+TS/2,bk[i],bt[i],3000+Math.random()*2000,85+Math.random()*40);bot.powerups=0;bot.team=-1;ENM.push(bot);}
@@ -2214,7 +2761,16 @@ function fireWeapon(){
     case"thrower":fb(a,380,dmg,9,1.7,true);fb(a+.14,360,dmg*.7,7,1.4,true);break;
     case"sniper":fireBul(PL.x,PL.y,a,850,dmg,color,dark,"player",4,1.1,rLife*1.8,false,false,false,true);break;
     case"healer":for(let i=0;i<3;i++)fireBul(PL.x,PL.y,a+(i-1)*.2,430,dmg,color,dark,"player",6,1.3,rLife,false,false,true);break;
-    case"blades":for(let i=0;i<4;i++)fb(a+(i-1.5)*.28,440,dmg,5,1.2);break;
+    case"blades":{
+      const edgarHeals=PL.bdKey==="EDGAR";
+      const edgarHealBoost=edgarHeals&&PL.hasStarPower;
+      for(let i=0;i<4;i++){
+        const _b=fireBul(PL.x,PL.y,a+(i-1.5)*.28,440,dmg,color,dark,"player",5,1.2,rLife,false,false,edgarHeals);
+      }
+      // Star Power: Fisticuffs visual — blue sparks on attack
+      if(edgarHealBoost){spark(PL.x,PL.y,"#8888FF");}
+      break;
+    }
     case"spike":fb(a,440,dmg,7,1.4);for(let i=0;i<4;i++)fb(a+(i+.5)/4*6.28,280,dmg*.5,4,.9);break;
     case"cards":for(let i=0;i<3;i++)fb(a+(i-1)*.17,460,dmg,6,1.3);break;
     case"hammer":fireBul(PL.x,PL.y,a,190,dmg,color,dark,"player",16,2.2,rLife);SHK=.18;break;
@@ -2251,6 +2807,23 @@ function fireSuper(){
 
 /* ═══ UPDATE PLAYER ═══ */
 function updatePlayer(){
+  // ── Respawn timer — must run even while dead ──
+  if(RESPAWN_T>0){RESPAWN_T-=DT;if(RESPAWN_T<=0){
+    const spawnPts=[[TS*16+TS/2,TS*11+TS/2],[TS*3+TS/2,TS*2+TS/2],[TS*28+TS/2,TS*2+TS/2],[TS*3+TS/2,TS*19+TS/2],[TS*28+TS/2,TS*19+TS/2]];
+    let bestPt=spawnPts[0],bestDist=0;
+    for(const[sx,sy]of spawnPts){
+      const minD=ENM.filter(e=>!e.dead).reduce((m,e)=>Math.min(m,Math.hypot(e.x-sx,e.y-sy)),9999);
+      if(minD>bestDist){bestDist=minD;bestPt=[sx,sy]}
+    }
+    PL.dead=false;PL.hp=PL.maxHp*.75;
+    PL.x=bestPt[0];PL.y=bestPt[1];
+    PL.vx=0;PL.vy=0;
+    PL.invT=3.5;PL.shield=0;
+    PL.ammo=PL.maxAmmo;
+    burst(PL.x,PL.y,PL.color,PL.dark,22,.9);
+    snd("wave");
+    RESPAWN_T=0;
+  }}
   if(PL.dead)return;
   let dx=0,dy=0;
   if(TOUCH.left){const jdx=TOUCH.left.x-TOUCH.left.sx,jdy=TOUCH.left.y-TOUCH.left.sy,jm=Math.hypot(jdx,jdy);const JRS=JR*SCL;if(jm>8*SCL){dx=jdx/Math.max(jm,JRS);dy=jdy/Math.max(jm,JRS)}}
@@ -2314,27 +2887,9 @@ function updatePlayer(){
     // Drop gems
     for(let _i=0;_i<(PL.gems||0);_i++){const _a=Math.random()*6.28,_r=15+Math.random()*30;GEM.push({x:PL.x+Math.cos(_a)*_r,y:PL.y+Math.sin(_a)*_r,collected:false,bob:Math.random()*6.28,sc:0,team:-1});}
     if(MODE==="gems"&&PL.gems>0){GG_GEMS_BLUE=Math.max(0,GG_GEMS_BLUE-PL.gems);PL.gems=0;}
-    if(MODE==="showdown"){SD_ALIVE--;setTimeout(()=>endGame(false),800);}
+    if(MODE==="showdown"){SD_ALIVE--;SD_RANK=SD_ALIVE+1;setTimeout(()=>endGame(false),800);}
     else if(MODE==="knockout"){PL_LIVES--;if(PL_LIVES<=0){setTimeout(()=>endGame(false),800)}else{RESPAWN_T=3;WANNOUNCE=2.5;WTEXT=PL_LIVES===1?t("lastChance"):t("livesLeft",PL_LIVES);}}
-    else{setTimeout(()=>endGame(false),700)}
-  }
-  if(RESPAWN_T>0){RESPAWN_T-=DT;if(RESPAWN_T<=0){
-    // Safe-spawn: finde Punkt möglichst weit weg von allen lebenden Feinden
-    const spawnPts=[[TS*16+TS/2,TS*11+TS/2],[TS*3+TS/2,TS*2+TS/2],[TS*28+TS/2,TS*2+TS/2],[TS*3+TS/2,TS*19+TS/2],[TS*28+TS/2,TS*19+TS/2]];
-    let bestPt=spawnPts[0],bestDist=0;
-    for(const[sx,sy]of spawnPts){
-      const minD=ENM.filter(e=>!e.dead).reduce((m,e)=>Math.min(m,Math.hypot(e.x-sx,e.y-sy)),9999);
-      if(minD>bestDist){bestDist=minD;bestPt=[sx,sy]}
-    }
-    PL.dead=false;PL.hp=PL.maxHp*.75;
-    PL.x=bestPt[0];PL.y=bestPt[1];
-    PL.vx=0;PL.vy=0;
-    PL.invT=3.5;PL.shield=0;
-    PL.ammo=PL.maxAmmo;
-    burst(PL.x,PL.y,PL.color,PL.dark,22,.9);
-    snd("wave");
-    RESPAWN_T=0; // clear timer after respawn
-  }
+    else{RESPAWN_T=3;WANNOUNCE=2.5;WTEXT=t("respawnSoon");}
   }
   // Update coin toasts
   for(let i=COIN_TOASTS.length-1;i>=0;i--){const ct=COIN_TOASTS[i];ct.y+=ct.vy*DT;ct.vy*=.9;ct.life-=DT;if(ct.life<=0)COIN_TOASTS.splice(i,1)}
@@ -2423,8 +2978,9 @@ function updateEnemies(){
       }
     }
     e.angle=Math.atan2(_ddy,_ddx);
-    // ── Low-HP cover logic ──
-    if(e.hp/e.maxHp<0.3&&!e._coverTarget&&Math.random()<DT*2){
+    // ── Low-HP cover logic — triggers earlier at higher difficulty ──
+    const coverThreshold=0.3+Math.min((e._diff||1)-1,1)*0.15; // 0.30 → 0.45
+    if(e.hp/e.maxHp<coverThreshold&&!e._coverTarget&&Math.random()<DT*2.5){
       const angles=[0,.785,1.57,2.355,3.14,3.925,4.71,5.5];
       let bestCover=null,bestScore=-1;
       for(const ang of angles){
@@ -2448,30 +3004,56 @@ function updateEnemies(){
     // ── Normal movement with flanking ──
     const perpX=-_ddy/_d,perpY=_ddx/_d;
     switch(e.type){
-      case"tank":e.vx=_d>75?(_ddx/_d)*e.spd*slowMult:0;e.vy=_d>75?(_ddy/_d)*e.spd*slowMult:0;break;
-      case"shooter":
-        if(_d<200){e.vx=-(_ddx/_d)*e.spd*.8*slowMult;e.vy=-(_ddy/_d)*e.spd*.8*slowMult}
-        else if(_d>310){e.vx=(_ddx/_d)*e.spd*slowMult;e.vy=(_ddy/_d)*e.spd*slowMult}
-        else{e.strT-=DT;if(e.strT<=0){e.strT=1.2+Math.random();e.strDir*=-1}e.vx=perpX*e.spd*.7*e.strDir*slowMult;e.vy=perpY*e.spd*.7*e.strDir*slowMult;}
+      case"tank":e.vx=_d>65?(_ddx/_d)*e.spd*slowMult:0;e.vy=_d>65?(_ddy/_d)*e.spd*slowMult:0;break;
+      case"shooter":{
+        const idealMin=170-(e._diff||1)*20,idealMax=320+(e._diff||1)*20;
+        if(_d<idealMin){e.vx=-(_ddx/_d)*e.spd*.95*slowMult;e.vy=-(_ddy/_d)*e.spd*.95*slowMult}
+        else if(_d>idealMax){e.vx=(_ddx/_d)*e.spd*slowMult;e.vy=(_ddy/_d)*e.spd*slowMult}
+        else{e.strT-=DT;if(e.strT<=0){e.strT=0.9+Math.random()*.7;e.strDir*=-1}e.vx=perpX*e.spd*.8*e.strDir*slowMult;e.vy=perpY*e.spd*.8*e.strDir*slowMult;}
         break;
-      case"aggressive":e.vx=(_ddx/_d)*e.spd*1.25*slowMult+perpX*e.spd*.25*slowMult;e.vy=(_ddy/_d)*e.spd*1.25*slowMult+perpY*e.spd*.25*slowMult;break;
-      case"agile":{e.strT-=DT;if(e.strT<=0){e.strT=.6+Math.random()*.7;e.strDir*=-1}const fwd=_d>160?0.72:0;e.vx=(_ddx/_d)*e.spd*fwd*slowMult+perpX*e.spd*(0.55+Math.max(0,1-_d/280)*.3)*e.strDir*slowMult;e.vy=(_ddy/_d)*e.spd*fwd*slowMult+perpY*e.spd*(0.55+Math.max(0,1-_d/280)*.3)*e.strDir*slowMult;break;}
-      case"mortar":if(d<260){e.vx=-(ddx/d)*e.spd*.85*slowMult;e.vy=-(ddy/d)*e.spd*.85*slowMult}else if(_d>390){e.vx=(ddx/d)*e.spd*.6*slowMult;e.vy=(ddy/d)*e.spd*.6*slowMult}else{e.vx*=.9;e.vy*=.9}break;
+      }
+      case"aggressive":e.vx=(_ddx/_d)*e.spd*1.35*slowMult+perpX*e.spd*.3*slowMult;e.vy=(_ddy/_d)*e.spd*1.35*slowMult+perpY*e.spd*.3*slowMult;break;
+      case"agile":{e.strT-=DT;if(e.strT<=0){e.strT=.5+Math.random()*.6;e.strDir*=-1}const fwd=_d>140?0.78:0;e.vx=(_ddx/_d)*e.spd*fwd*slowMult+perpX*e.spd*(0.65+Math.max(0,1-_d/260)*.35)*e.strDir*slowMult;e.vy=(_ddy/_d)*e.spd*fwd*slowMult+perpY*e.spd*(0.65+Math.max(0,1-_d/260)*.35)*e.strDir*slowMult;break;}
+      case"mortar":if(d<240){e.vx=-(ddx/d)*e.spd*.9*slowMult;e.vy=-(ddy/d)*e.spd*.9*slowMult}else if(_d>410){e.vx=(ddx/d)*e.spd*.65*slowMult;e.vy=(ddy/d)*e.spd*.65*slowMult}else{e.vx*=.88;e.vy*=.88}break;
     }}
     if(e.vx||e.vy)e.walkT=(e.walkT||0)+DT*7;
     move(e);
-    e.sTimer-=DT;
-    if(e.sTimer<=0&&_d<400&&(e.team===-1||(!PL.dead&&e.targetVisible!==false))){
-      e.sTimer=e.sCool;const a=e.angle;
-      if(e.type==="tank")fireBul(e.x,e.y,a,270,900,e.color,e.dark,"enemy",9,1.55,1.8);
-      else if(e.type==="shooter"){fireBul(e.x,e.y,a,400,720,e.color,e.dark,"enemy",6,1.2,1.9);fireBul(e.x,e.y,a+.11,385,600,e.color,e.dark,"enemy",5,1.1,1.9);fireBul(e.x,e.y,a-.11,385,600,e.color,e.dark,"enemy",5,1.1,1.9)}
-      else if(e.type==="aggressive")fireBul(e.x,e.y,a,355,780,e.color,e.dark,"enemy",8,1.4,1.8);
-      else if(e.type==="agile"){fireBul(e.x,e.y,a,430,650,e.color,e.dark,"enemy",6,1.2,1.9);fireBul(e.x,e.y,a+e.strDir*1.4,410,560,e.color,e.dark,"enemy",5,1.0,1.9)}
-      else if(e.type==="mortar"){for(let i=-1;i<=1;i++)fireBul(e.x,e.y,a+i*.18,320,820,e.color,e.dark,"enemy",10,2.0,2.2,true)}
+    const _fireRange=320+Math.min((e._diff||1)*80,220); // 320–540 px depending on difficulty
+    if(e.sTimer<=0&&_d<_fireRange&&(e.team===-1||(!PL.dead&&e.targetVisible!==false))){
+      e.sTimer=e.sCool;
+      // Aim prediction: lead the target proportional to difficulty
+      const leadFactor=Math.min((e._diff||1)-1,1.0)*0.55;
+      const bspd=e.type==="tank"?270:e.type==="mortar"?320:400;
+      const travelT=_d/bspd*leadFactor;
+      const predX=(PL.vx||0)*travelT, predY=(PL.vy||0)*travelT;
+      const a=e.angle;
+      const aimA=Math.atan2(_ddy+predY,_ddx+predX);
+      const spread=Math.max(0,0.18-(e._diff||1)*0.05);
+      const jitter=(Math.random()-.5)*spread*2;
+      const fa=aimA+jitter;
+      // owner tag: showdown bots use "showdown_bot" so they can't hit each other's ownerRef
+      const _owner=e.team===-1?"enemy":"enemy";
+      function _eb(angle,spd,dmg,r,sc,life,ignWalls=false){
+        const _bul=fireBul(e.x,e.y,angle,spd,dmg,e.color,e.dark,_owner,r,sc,life,ignWalls);
+        if(_bul)_bul.ownerRef=e; // always set ownerRef so self-hit check works
+        return _bul;
+      }
+      if(e.type==="tank")_eb(fa,270,900*(e._diff||1),9,1.55,1.8);
+      else if(e.type==="shooter"){_eb(fa,420,740*(e._diff||1),6,1.2,1.9);_eb(fa+.10,400,600*(e._diff||1),5,1.1,1.9);_eb(fa-.10,400,600*(e._diff||1),5,1.1,1.9);}
+      else if(e.type==="aggressive")_eb(fa,370,820*(e._diff||1),8,1.4,1.8);
+      else if(e.type==="agile"){_eb(fa,450,680*(e._diff||1),6,1.2,1.9);_eb(fa+e.strDir*1.3,420,570*(e._diff||1),5,1.0,1.9)}
+      else if(e.type==="mortar"){for(let i=-1;i<=1;i++){const _bm=fireBul(e.x,e.y,fa+i*.16,320,880*(e._diff||1),e.color,e.dark,_owner,10,2.0,2.2,true);if(_bm)_bm.ownerRef=e;}}
       burst(e.x+Math.cos(a)*26,e.y+Math.sin(a)*26,e.color,e.dark,5,.2);
     }
+    const _superRange=240+Math.min((e._diff||1)*50,160);
     e.supTimer-=DT;
-    if(e.supTimer<=0&&_d<300){e.supTimer=e.supCool;if(e.type==="tank"){e.vx=(_ddx/_d)*620;e.vy=(_ddy/_d)*620;burst(e.x,e.y,e.color,e.dark,14,.55)}else if(e.type==="agile"){for(let i=0;i<7;i++){const ta=e.angle+(i/7-.5)*1.1;fireBul(e.x,e.y,ta,420,530,e.color,e.dark,"enemy",6,1.2,1.9)}burst(e.x,e.y,e.color,e.dark,18,.75)}}
+    if(e.supTimer<=0&&_d<_superRange){
+      e.supTimer=e.supCool;
+      if(e.type==="tank"){e.vx=(_ddx/_d)*680;e.vy=(_ddy/_d)*680;burst(e.x,e.y,e.color,e.dark,16,.6)}
+      else if(e.type==="agile"){for(let i=0;i<8;i++){const ta=e.angle+(i/8-.5)*1.2;const _bs=fireBul(e.x,e.y,ta,440,560*(e._diff||1),e.color,e.dark,"enemy",6,1.2,1.9);if(_bs)_bs.ownerRef=e;}burst(e.x,e.y,e.color,e.dark,20,.8)}
+      else if(e.type==="aggressive"){e.vx=(_ddx/_d)*550;e.vy=(_ddy/_d)*550;for(let i=0;i<3;i++)setTimeout(()=>{if(!e.dead){const _ba=fireBul(e.x,e.y,e.angle,400,700*(e._diff||1),e.color,e.dark,"enemy",7,1.3,1.8);if(_ba)_ba.ownerRef=e;}},i*150)}
+      else if(e.type==="shooter"){for(let i=0;i<5;i++){const sa=e.angle+(i-2)*.14;const _bsh=fireBul(e.x,e.y,sa,420,550*(e._diff||1),e.color,e.dark,"enemy",6,1.1,1.9);if(_bsh)_bsh.ownerRef=e;}}
+    }
     if(e.hp<=0){
       e.dead=true;KILLS++;SAVE.totalKills++;
       addBrawlPassXP(20+WAVE*5);
@@ -2537,6 +3119,8 @@ function updateBullets(){
         // Block gadget (CROW)
         if(PL._blockNext){PL._blockNext=false;PL.invT=1;PL.flashT=.1;burst(PL.x,PL.y,"#4DFFAA","#00FF88",12,.5);spawnDmg(PL.x,PL.y-30,"BLOCKED!","#4DFFAA");BUL.splice(i,1);continue}
         let d2=b.dmg;PL.hp-=d2;PL.invT=.22;PL.flashT=.07;FLASH=.45;SHK=.25;
+        // Star Power: EDGAR Fisticuffs — charge super when hit
+        if(PL.hasStarPower&&PL.bdKey==="EDGAR"){PL.sup=Math.min(PL.supMax,PL.sup+18);spark(PL.x,PL.y,"#8888FF");}
         spark(PL.x,PL.y,"#FF4444");spawnDmg(PL.x+(Math.random()-.5)*28,PL.y-30,`-${Math.round(d2)}`,"#FF5555");snd("hitplayer");BUL.splice(i,1);
       }
       // Also damage blue allies OR in showdown damage other bots
@@ -2575,7 +3159,7 @@ function updateBullets(){
         // Knockback: push enemy away from bullet direction
         const kba=Math.atan2(b.vy,b.vx),kbs=55+b.dmg*.015;
         e.vx+=Math.cos(kba)*kbs;e.vy+=Math.sin(kba)*kbs;
-        if(b.heals)PL.hp=Math.min(PL.maxHp,PL.hp+65);
+        if(b.heals)PL.hp=Math.min(PL.maxHp,PL.hp+(PL.hasStarPower&&PL.bdKey==="EDGAR"?98:65));
         if(b.isRocket)rocketExplode(b);
         spark(e.x,e.y,"#FFAA22");spawnDmg(e.x+(Math.random()-.5)*22,e.y-32,`${Math.round(d2)}`,"#FFEE44");snd("hit");BUL.splice(i,1);hit=true;break;
       }}
@@ -2612,8 +3196,8 @@ function endGame(won){
   const newRank=getRank(SAVE.trophies);
   if(newRank>oldRank){window._rankUp=newRank;window._rankUpCol=getRankColor(newRank);}
   else{window._rankUp=0;}
-  // Award Brawl Pass XP
-  const bpXP=won?(150+KILLS*20):(50+KILLS*10);
+  // Award Brawl Pass XP — balanced: ~10-15 matches per tier
+  const bpXP=won?(30+KILLS*3):(10+KILLS*1);
   addBrawlPassXP(bpXP);
   // Award power points for active brawler
   const ppGain=won?(8+KILLS*2):(2+KILLS);
@@ -3338,8 +3922,7 @@ function drawBrawlerUI(b,isPlayer,bx,topY){
   X.strokeStyle=isPlayer?"rgba(100,180,255,.7)":b.team===0?"rgba(80,140,255,.6)":"rgba(255,80,80,.5)";X.lineWidth=1.5;
   rr(bx-ntW2/2,ntY2,ntW2,ntH2,ntH2/2);X.stroke();
   X.fillStyle="#FFF";X.font=`bold 10px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-  {const _clb=getBrawlerClass(b);const _clIcon=_clb?_clb.icon:"";
-   X.fillText((_clIcon?_clIcon+" ":"")+name,bx,ntY2+ntH2/2);}
+  X.fillText(name,bx,ntY2+ntH2/2);
   X.restore();
 
   // ── Health bar background ──
@@ -3707,12 +4290,10 @@ function hslToHex(h,s,l){
 }
 function saveCreatedBrawler(){
   if(!CREATE.name||CREATE.name.trim()===""){
-    // Flash name field red as hint
     CREATE._nameError=true;setTimeout(()=>CREATE._nameError=false,1500);return;
   }
-  // Generate a stable key based on name + timestamp (mod keeps it short)
-  const key="CUSTOM_"+(Date.now()%1000000);
-  // Build the full save object with all fields
+  // If editing an existing custom brawler, reuse its key; otherwise generate a new one
+  const key=CREATE._editKey||("CUSTOM_"+(Date.now()%1000000));
   const bd={
     key,
     name:      CREATE.name.trim(),
@@ -3729,11 +4310,10 @@ function saveCreatedBrawler(){
     bri:       CREATE.bri,
   };
   saveCreatedBrawlerToSlot(bd);
-  // Select the newly created brawler
   const idx=BD.findIndex(b=>b.key===key);
   if(idx>=0){SEL=idx;BRAWLER_SEL=idx;}
-  // Show unlock animation
   showUnlockAnim(BD[idx>=0?idx:BD.length-1]);
+  CREATE._editKey=null;
   STATE="home";snd("unlock");
 }
 function drawCreateScreen(){
@@ -3804,8 +4384,10 @@ function drawCreateScreen(){
   ckeys.forEach((ck,i)=>{const BC=CLASS[ck];const bx=rx+10+(i%2)*110,by=396+(Math.floor(i/2)*36),sel=CREATE.brawlerClass===ck;
     if(sel)gl(BC.color,8);X.fillStyle=sel?ca(BC.color,"33"):"rgba(0,0,0,.4)";rr(bx,by,100,28,7);X.fill();
     X.strokeStyle=sel?BC.color:"rgba(120,80,30,.3)";X.lineWidth=sel?2:1;rr(bx,by,100,28,7);X.stroke();ng();
-    X.fillStyle=sel?BC.color:"rgba(200,170,110,.7)";X.font='bold 8px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
-    X.fillText(BC.icon+" "+BC.short,bx+50,by+14);});
+    const btnCol=sel?BC.color:"rgba(200,170,110,.7)";
+    drawClassIcon(BC.iconKey,bx+12,by+14,14,btnCol);
+    X.fillStyle=btnCol;X.font='bold 8px "Lilita One"';X.textAlign="left";X.textBaseline="middle";
+    X.fillText(BC.short,bx+22,by+14);});
   // ── SAVE BUTTON ──────────────────────────────────────────────────
   const pulse=.97+Math.sin(CREATE_PREVIEW_T*2.5)*.03;
   const nameOk=CREATE.name&&CREATE.name.trim().length>0;
@@ -4355,9 +4937,11 @@ function drawSelectScreen(){
   gl(R.glow,4);X.fillStyle=R.color;X.font=`bold 10px "Lilita One"`;X.fillText(`★ ${R.label.toUpperCase()}`,108,infoY+26);ng();
   X.fillStyle="rgba(200,210,255,.72)";X.font=`bold 10px "Lilita One"`;X.fillText(bd.desc,108,infoY+38);
   // Class badge top-left
-  {const CL=getBrawlerClass(bd);X.fillStyle="rgba(0,0,0,.6)";rr(4,4,56,15,7);X.fill();
+  {const CL=getBrawlerClass(bd);X.fillStyle="rgba(0,0,0,.6)";rr(4,4,64,15,7);X.fill();
+   X.strokeStyle=ca(CL.color,"88");X.lineWidth=1;rr(4,4,64,15,7);X.stroke();
+   drawClassIcon(CL.iconKey,13,11.5,11,CL.color);
    X.fillStyle=CL.color;X.font='bold 7px "Lilita One"';X.textAlign="left";X.textBaseline="middle";
-   X.fillText(CL.icon+" "+CL.nameDE,7,11);}
+   X.fillText(CL.nameDE,20,11);}
   X.fillStyle="rgba(160,170,220,.58)";X.fillText(`⚡ ${bd.superDesc}`,108,infoY+50);
   // ── Power Level + Gadget + StarPower badges (right side of info) ──
   {
@@ -4528,8 +5112,9 @@ function drawCard(cx,cy,bd,selected,idx){
   {const BC=getBrawlerClass(bd);
    X.fillStyle="rgba(0,0,0,.7)";rr(3,5,38,14,4);X.fill();
    gl(BC.color,4);X.strokeStyle=ca(BC.color,"88");X.lineWidth=1;rr(3,5,38,14,4);X.stroke();ng();
-   X.fillStyle=BC.color;X.font='bold 7px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
-   X.fillText(BC.icon+" "+BC.short,22,12);}
+   drawClassIcon(BC.iconKey,12,12,11,BC.color);
+   X.fillStyle=BC.color;X.font='bold 6px "Lilita One"';X.textAlign="left";X.textBaseline="middle";
+   X.fillText(BC.short,19,12);}
 
   X.restore();}catch(e){console.error("drawCard",e);X.restore();}
 }
@@ -4775,14 +5360,46 @@ const MM_TAGS=()=>"#"+Math.random().toString(36).slice(2,8).toUpperCase();
 function startMatchmaking(){
   MM_T=0;MM_PHASE=0;MM_DOTS=0;
   const curM=MODES[MODE_SEL];
-  const slotCount=curM.key==="showdown"?9:curM.key==="brawlball"?5:3;
-  // Generate fake opponent slots (empty at start, fill in over time)
+  const slotCount=curM.key==="showdown"?9:5; // always 5 for team modes (2 allies + 3 enemies)
+  // Pre-generate the full lineup so the same brawlers appear in MM and in-game
+  const _pool=BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);
+  const _tmap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",
+    BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"mortar",TICK:"shooter",
+    GENE:"shooter",PAM:"shooter",EMZ:"shooter",COLETTE:"shooter",
+    TARA:"aggressive",MORTIS:"aggressive",BIBI:"aggressive",EDGAR:"aggressive",SANDY:"aggressive",LOLA:"aggressive",
+    LEON:"agile",CROW:"agile",MAX:"agile",LILY:"agile",SPIKE:"shooter",
+    SHELLY:"shooter",POCO:"agile",NITA:"tank",MR_P:"shooter"};
+  MM_LINEUP={};
+  if(curM.key==="showdown"){
+    MM_LINEUP.bots=_pool.slice(0,9);
+  } else if(curM.key==="brawlball"){
+    MM_LINEUP.allies=[_pool[0]||"POCO",_pool[1]||"COLT"];
+    MM_LINEUP.redDef=[_pool[2]||"BULL",_pool[3]||"FRANK",_pool[4]||"ROSA"];
+    MM_LINEUP.redAtt=[_pool[5]||"BROCK",_pool[6]||"COLT"];
+  } else {
+    MM_LINEUP.allies=[_pool[0]||"POCO",_pool[1]||"COLT"];
+    MM_LINEUP.enemies=[_pool[2]||"BULL",_pool[3]||"TARA",_pool[4]||"BROCK"];
+  }
+  // Build slot list: allies first (blue), then enemies (red)
   MM_PLAYERS=[];
+  let slotKeys,slotAllys;
+  if(curM.key==="showdown"){
+    slotKeys=MM_LINEUP.bots;
+    slotAllys=Array(9).fill(false);
+  } else if(curM.key==="brawlball"){
+    slotKeys=[...MM_LINEUP.allies,...MM_LINEUP.redDef,...MM_LINEUP.redAtt].slice(0,5);
+    slotAllys=[true,true,false,false,false];
+  } else {
+    // allies first, then enemies
+    slotKeys=[...MM_LINEUP.allies,...MM_LINEUP.enemies];
+    slotAllys=[true,true,false,false,false];
+  }
   for(let i=0;i<slotCount;i++){
     MM_PLAYERS.push({
-      name:null, tag:null, trophies:null,
-      rank:null, color:null, rarity:null,
-      fillAt: 0.3+Math.random()*2.5  // seconds until this slot fills
+      name:null,tag:null,trophies:null,rank:null,color:null,rarity:null,
+      bdKey:slotKeys[i]||BD[i%BD.length].key,
+      isAlly:slotAllys[i]||false,
+      fillAt:0.3+Math.random()*2.5
     });
   }
   STATE="matchmaking";
@@ -4791,12 +5408,18 @@ function startMatchmaking(){
 function updateMatchmaking(){
   MM_T+=DT;
   MM_DOTS=Math.floor(MM_T*2)%4;
+  const key=BD[SEL].key;
+  const p2=isPrestige2(key);
+  const bt=SAVE.brawlerTrophies[key]||0;
   // Fill player slots progressively
   MM_PLAYERS.forEach(p=>{
     if(!p.name&&MM_T>=p.fillAt){
-      p.name=MM_NAMES[Math.floor(Math.random()*MM_NAMES.length)];
-      p.tag=MM_TAGS();
-      p.trophies=Math.floor(Math.random()*8000+200);
+      // At Prestige 2: hide player names (show ??? instead)
+      p.name=p2?"???":MM_NAMES[Math.floor(Math.random()*MM_NAMES.length)];
+      p.tag=p2?"#????":MM_TAGS();
+      // Trophy spread: close to player's brawler trophies (tighter at Prestige 2)
+      const spread=p2?0.15:0.5;
+      p.trophies=Math.max(0,Math.floor(bt*(1-spread+Math.random()*spread*2)));
       p.rank=Math.floor(Math.random()*20)+1;
       p.color=BD[Math.floor(Math.random()*BD.length)].color;
       p.rarity=["COMMON","RARE","SUPER_RARE","EPIC","MYTHIC"][Math.floor(Math.random()*5)];
@@ -4870,54 +5493,95 @@ function drawMatchmaking(){
   gl(R.color,5);X.fillStyle=R.color;X.font=`bold 12px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
   X.fillText(bd.name.toUpperCase(),myX,myY+ringR+66);ng();
 
-  // ── OPPONENT SLOTS ──
+  // ── SLOTS: Allies left, Enemies right ──
   const slots=MM_PLAYERS;
   const slotR=38;
-  const totalSlots=slots.length;
-  // Arrange in arc around center
-  const arcR=Math.min(W,H)*.36;
-  const arcStart=-Math.PI*.7,arcEnd=Math.PI*.7;
-  slots.forEach((p,i)=>{
-    const t2=totalSlots>1?arcStart+(arcEnd-arcStart)*(i/(totalSlots-1)):0;
-    const sx=myX+Math.cos(t2-Math.PI/2)*arcR*(totalSlots>4?1.1:0.95);
-    const sy=myY+Math.sin(t2-Math.PI/2)*arcR*.55;
+  const allies=slots.filter(p=>p.isAlly);
+  const enemies=slots.filter(p=>!p.isAlly);
+  const isShowdown=MODES[MODE_SEL].key==="showdown";
+
+  function drawSlot(p,sx,sy){
     if(p.name){
-      // Filled slot — pick a random brawler for their portrait
-      const pR=RARITY[p.rarity]||RARITY.COMMON;
+      const pBD=BD.find(b=>b.key===p.bdKey)||BD[0];
+      const pR=RARITY[pBD.rarity]||RARITY.COMMON;
       const appeared=Math.min(1,(MM_T-(p.fillAt||0))*3);
       X.save();X.globalAlpha=Math.min(1,appeared*2);
       X.translate(sx,sy);X.scale(.8+appeared*.2,.8+appeared*.2);
-      // Rarity glow ring
-      gl(pR.color,8);
-      X.strokeStyle=pR.color;X.lineWidth=2.5;X.beginPath();X.arc(0,0,slotR+3,0,6.28);X.stroke();ng();
-      // Pick a random unlocked brawler for visual (based on name hash)
-      const hash=p.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-      const pBD=BD[hash%BD.length];
+      const teamCol=p.isAlly?"#4488FF":isShowdown?"#AAAAAA":"#FF4444";
+      gl(teamCol,10);
+      X.strokeStyle=teamCol;X.lineWidth=3;X.beginPath();X.arc(0,0,slotR+5,0,6.28);X.stroke();ng();
+      gl(pR.color,4);X.strokeStyle=pR.color;X.lineWidth=2;X.beginPath();X.arc(0,0,slotR+1,0,6.28);X.stroke();ng();
       drawBrawlerImage(pBD,0,0,slotR*.85);
-      // Name + trophies
-      X.fillStyle="#FFF";X.font=`bold 9px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-      X.fillText(p.name.slice(0,12),0,slotR+14);
+      X.fillStyle=p.isAlly?"#88CCFF":isShowdown?"#DDDDDD":"#FF8888";
+      X.font=`bold 9px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText(pBD.name.toUpperCase(),0,slotR+14);
       X.fillStyle="#FFD700";X.font=`bold 8px "Lilita One"`;
       X.fillText(`🏆${p.trophies}`,0,slotR+26);
       X.restore();
     } else {
-      // Empty searching slot
-      const pulse=.5+Math.sin(MM_T*3+i)*.5;
+      const pulse=.5+Math.sin(MM_T*3+sy)*.5;
+      const dashCol=p.isAlly?"#4488FF":isShowdown?"#8888AA":"#FF4444";
       X.globalAlpha=0.3+pulse*.3;
-      X.strokeStyle="#8866FF";X.lineWidth=2;
-      // Dashed circle
-      X.setLineDash([8,6]);
-      X.beginPath();X.arc(sx,sy,slotR,0,6.28);X.stroke();
-      X.setLineDash([]);
-      X.globalAlpha=0.4+pulse*.2;
-      X.fillStyle="#8866FF";X.font=`bold 11px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-      X.fillText("?",sx,sy);
-      X.globalAlpha=1;
+      X.strokeStyle=dashCol;X.lineWidth=2;
+      X.setLineDash([8,6]);X.beginPath();X.arc(sx,sy,slotR,0,6.28);X.stroke();X.setLineDash([]);
+      X.globalAlpha=0.5+pulse*.2;
+      X.fillStyle=dashCol;X.font=`bold 11px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText("?",sx,sy);X.globalAlpha=1;
     }
-  });
+  }
+
+  if(isShowdown){
+    // Showdown: arc around player
+    const arcR=Math.min(W,H)*.36;
+    const arcStart=-Math.PI*.7,arcEnd=Math.PI*.7;
+    slots.forEach((p,i)=>{
+      const t2=slots.length>1?arcStart+(arcEnd-arcStart)*(i/(slots.length-1)):0;
+      const sx=myX+Math.cos(t2-Math.PI/2)*arcR*1.1;
+      const sy=myY+Math.sin(t2-Math.PI/2)*arcR*.55;
+      drawSlot(p,sx,sy);
+    });
+  } else {
+    // Team mode: allies on left, enemies on right
+    // Team label
+    if(allies.length>0){
+      X.fillStyle="rgba(68,136,255,.18)";X.strokeStyle="rgba(68,136,255,.35)";X.lineWidth=1;
+      rr(myX-370,myY-slotR-30,240,slotR*2+90,14);X.fill();X.stroke();
+      gl("#4488FF",6);X.fillStyle="#4488FF";X.font=`bold 10px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText("🔵 DEIN TEAM",myX-250,myY-slotR-18);ng();
+    }
+    if(enemies.length>0){
+      X.fillStyle="rgba(255,68,68,.18)";X.strokeStyle="rgba(255,68,68,.35)";X.lineWidth=1;
+      rr(myX+130,myY-slotR-30,240,slotR*2+90,14);X.fill();X.stroke();
+      gl("#FF4444",6);X.fillStyle="#FF4444";X.font=`bold 10px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText("🔴 GEGNER",myX+250,myY-slotR-18);ng();
+    }
+    // Ally positions: 1 or 2 on the left
+    const allySpacing=90;
+    allies.forEach((p,i)=>{
+      const ox=(i-(allies.length-1)/2)*allySpacing;
+      drawSlot(p,myX-260+ox,myY);
+    });
+    // Enemy positions: up to 5 on the right, 2 rows
+    enemies.forEach((p,i)=>{
+      const col=i%3,row=Math.floor(i/3);
+      const ex=myX+180+col*88;
+      const ey=myY+(row-0.5)*allySpacing;
+      drawSlot(p,ex,ey);
+    });
+  }
 
   // ── STATUS TEXT ──
   const statusY=H*.82;
+  // Prestige 2 badge
+  const _mmKey=BD[SEL].key;
+  const _mmP2=isPrestige2(_mmKey);
+  if(_mmP2){
+    const p2W=220,p2H=22,p2X=W/2-p2W/2;
+    X.fillStyle="rgba(255,180,0,.15)";rr(p2X,statusY-38,p2W,p2H,11);X.fill();
+    X.strokeStyle="rgba(255,180,0,.4)";X.lineWidth=1;rr(p2X,statusY-38,p2W,p2H,11);X.stroke();
+    gl("#FFD700",4);X.fillStyle="#FFD700";X.font=`bold 10px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+    X.fillText("⭐ PRESTIGE 2 — Echte Spieler, Namen verborgen",W/2,statusY-27);ng();
+  }
   if(MM_PHASE===0){
     const dots=".".repeat(MM_DOTS);
     const filled=slots.filter(p=>p.name).length;
@@ -5062,6 +5726,16 @@ function drawBrawlerCollection(){
       X.fillStyle="#FFF";X.font='bold 7px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
       X.fillText(`P${pl}`,cx+cardW-13,cy+12);
     }
+
+    // Class badge (top-left corner)
+    {
+      const BC=getBrawlerClass(b);
+      X.fillStyle="rgba(0,0,0,.72)";rr(cx+3,cy+5,32,13,4);X.fill();
+      X.strokeStyle=ca(BC.color,"99");X.lineWidth=1;rr(cx+3,cy+5,32,13,4);X.stroke();
+      drawClassIcon(BC.iconKey,cx+12,cy+11.5,10,BC.color);
+      X.fillStyle=BC.color;X.font='bold 6px "Lilita One"';X.textAlign="left";X.textBaseline="middle";
+      X.fillText(BC.short,cx+18,cy+11.5);
+    }
   });
   X.restore();
 
@@ -5126,7 +5800,71 @@ function drawBrawlerCollection(){
     gl(R.color,4);X.fillStyle=R.color;X.font='10px serif';X.textAlign="center";X.textBaseline="middle";
     X.fillText("★",sx,ry);ng();
   }
-  ry+=18;
+  ry+=20;
+
+  // ── CLASS BADGE ──
+  {
+    const CL=getBrawlerClass(bd);
+    const badgeW=panW-24, badgeH=30;
+    const bx=panX+12, by=ry;
+    // Badge background
+    const clGr=X.createLinearGradient(bx,by,bx,by+badgeH);
+    clGr.addColorStop(0,ca(CL.color,"33"));clGr.addColorStop(1,ca(CL.color,"18"));
+    X.fillStyle=clGr;rr(bx,by,badgeW,badgeH,14);X.fill();
+    gl(CL.color,8);X.strokeStyle=ca(CL.color,"CC");X.lineWidth=1.5;rr(bx,by,badgeW,badgeH,14);X.stroke();ng();
+    // Canvas icon left
+    drawClassIcon(CL.iconKey,bx+16,by+badgeH/2,18,CL.color);
+    // Class name center
+    gl(CL.color,6);X.fillStyle=CL.color;X.font='bold 11px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+    X.fillText(CL.nameDE.toUpperCase(),cx2+6,by+badgeH/2);ng();
+    ry+=36;
+
+    // Beschreibungstext (mehrzeilig)
+    const descText=CL.desc;
+    const descWords=descText.split(" ");
+    X.fillStyle="rgba(210,200,255,.75)";X.font='bold 7px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+    let dLine2="";
+    for(const w of descWords){
+      const test=dLine2?dLine2+" "+w:w;
+      if(test.length>32){X.fillText(dLine2,cx2,ry);ry+=11;dLine2=w;}
+      else dLine2=test;
+    }
+    if(dLine2){X.fillText(dLine2,cx2,ry);ry+=13;}
+    ry+=4;
+
+    // Stärken / Schwächen Zeile mit Canvas-Icons
+    const strKeys=CL.strong||[],wkKeys=CL.weak||[];
+    const swBadgeH=20,swBadgeW=(panW-24)/2-3;
+    if(strKeys.length>0||wkKeys.length>0){
+      // Stärken
+      X.fillStyle="rgba(68,255,136,.15)";rr(panX+12,ry,swBadgeW,swBadgeH,9);X.fill();
+      X.strokeStyle="rgba(68,255,136,.4)";X.lineWidth=1;rr(panX+12,ry,swBadgeW,swBadgeH,9);X.stroke();
+      X.fillStyle="#44FF88";X.font='bold 7px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+      // Draw small icons for strong classes
+      const strCls=strKeys.slice(0,2).map(k=>CLASS[k]).filter(Boolean);
+      const strLbl=strCls.map(c=>c.short).join(", ");
+      let siX=panX+12+10;
+      for(const sc of strCls){drawClassIcon(sc.iconKey,siX,ry+swBadgeH/2,10,"#44FF88");siX+=12;}
+      X.fillStyle="#44FF88";X.textAlign="left";
+      X.fillText("💪 "+strLbl,siX+2,ry+swBadgeH/2);
+      // Schwächen
+      X.fillStyle="rgba(255,80,80,.15)";rr(panX+12+swBadgeW+6,ry,swBadgeW,swBadgeH,9);X.fill();
+      X.strokeStyle="rgba(255,80,80,.4)";X.lineWidth=1;rr(panX+12+swBadgeW+6,ry,swBadgeW,swBadgeH,9);X.stroke();
+      const wkCls=wkKeys.slice(0,2).map(k=>CLASS[k]).filter(Boolean);
+      const wkLbl=wkCls.map(c=>c.short).join(", ");
+      let wiX=panX+12+swBadgeW+6+10;
+      for(const wc of wkCls){drawClassIcon(wc.iconKey,wiX,ry+swBadgeH/2,10,"#FF6666");wiX+=12;}
+      X.fillStyle="#FF6666";X.textAlign="left";
+      X.fillText("⚠ "+wkLbl,wiX+2,ry+swBadgeH/2);
+      ry+=26;
+    }
+    // Tip-Text
+    X.fillStyle="rgba(180,170,230,.55)";X.font='bold 7px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+    const tipWords=CL.tip.split(" ");let tLine="";
+    for(const w of tipWords){const t2=tLine?tLine+" "+w:w;if(t2.length>34){X.fillText(tLine,cx2,ry);ry+=10;tLine=w;}else tLine=t2;}
+    if(tLine){X.fillText(tLine,cx2,ry);ry+=12;}
+    ry+=4;
+  }
 
   if(!owned){
     // Unlock button
@@ -5640,17 +6378,6 @@ function drawStarrDropTab(cY,cH){
   X.strokeText(canOpen?"📦 DROP ÖFFNEN":"Keine Drops",W/2,upY+22);
   X.fillStyle=canOpen?"#FFF":"rgba(150,140,180,.7)";X.fillText(canOpen?"📦 DROP ÖFFNEN":"Keine Drops",W/2,upY+22);
   drawUpgradeScreen._openBtn={y:upY,canOpen};
-  // Anim
-  if(STARR_DROP_ANIM){
-    STARR_DROP_ANIM.t+=DT;
-    const prog=STARR_DROP_ANIM.t/STARR_DROP_ANIM.dur,fa=prog<.1?prog/.1:prog>.8?(1-(prog-.8)/.2):1;
-    if(fa>0){
-      X.globalAlpha=fa;X.fillStyle="rgba(0,0,0,.85)";X.fillRect(0,0,W,H);
-      gl(STARR_DROP_ANIM.color,30);X.fillStyle=STARR_DROP_ANIM.color;X.font='bold 28px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText(STARR_DROP_ANIM.label,W/2,H/2);ng();
-      X.globalAlpha=1;
-    }
-    if(STARR_DROP_ANIM.t>STARR_DROP_ANIM.dur)STARR_DROP_ANIM=null;
-  }
 }
 function handleUpgradeClick(x,y){
   const d=drawUpgradeScreen;
@@ -5712,7 +6439,7 @@ function handleUpgradeClick(x,y){
     SAVE.activeStarPower[BD[SEL].key]=!SAVE.activeStarPower[BD[SEL].key];persist();snd("select");return;
   }
   if(UPGRADE_TAB===4&&d._openBtn?.canOpen&&Math.abs(x-W/2)<110&&y>d._openBtn.y&&y<d._openBtn.y+44){
-    openStarrDrop();return;
+    startStarrDropScreen("upgrade");return;
   }
 }
 
@@ -5754,7 +6481,8 @@ function drawEnd(won){
   // Subtitle
   X.fillStyle=won?"rgba(150,255,180,.75)":"rgba(255,150,150,.75)";
   X.font=`bold 15px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-  X.fillText(won?t("victoryMsg"):t("defeatMsg"),W/2,pany+120);
+  const subtitleTxt=MODE==="showdown"?`🏆 Platz ${SD_RANK} von 10`:(won?t("victoryMsg"):t("defeatMsg"));
+  X.fillText(subtitleTxt,W/2,pany+120);
 
   // ── Reward row — 4 tiles: Coins, Gems, PP, Trophies ──
   const rTileW=108,rTileH=56,rGap=8;
@@ -5764,7 +6492,9 @@ function drawEnd(won){
     {icon:"🪙",label:"Münzen",val:`+${SESSION_COINS}`,col:"#FFD700"},
     {icon:"💎",label:"Gems",val:won?`+${3+KILLS}`:"—",col:"#00FFCC"},
     {icon:"⚡",label:"Power-P.",val:`+${window._ppGained||0}`,col:"#FF8800"},
-    {icon:"🏆",label:"Trophäen",val:`${(window._trophiesWon||0)>0?"+":""}${window._trophiesWon||0}`,col:"#FFD700"},
+    {icon:"🏆",label:"Trophäen"+(window._trophyStreakLabel?` ${window._trophyStreakLabel}`:""),
+      val:`${(window._trophiesWon||0)>0?"+":""}${window._trophiesWon||0}`,
+      col:(window._trophiesWon||0)>=0?"#FFD700":"#FF5555"},
   ];
   const csc=1+Math.sin(T*3)*.035;
   rewardItems.forEach((ri,i)=>{
@@ -5852,13 +6582,17 @@ function initBrawlBall(){
   BB_GOALS_BLUE=0;BB_GOALS_RED=0;BB_MATCH_TIMER=210;
   // 3 red defenders + 2 attackers
   ENM=[];
-  const redDef=["BULL","FRANK","ROSA"];const redAtt=["COLT","BROCK"];
+  const _bbEPool=MM_LINEUP?.redDef?.length?null:BD.map(b=>b.key).filter(k=>k!==PL.bdKey).sort(()=>Math.random()-.5);
+  const _bbTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"shooter",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive"};
+  const redDef=MM_LINEUP?.redDef||[_bbEPool[0]||"BULL",_bbEPool[1]||"FRANK",_bbEPool[2]||"ROSA"];
+  const redAtt=MM_LINEUP?.redAtt||[_bbEPool[3]||"COLT",_bbEPool[4]||"BROCK"];
   const redSpawns=[[TS*22,TS*10],[TS*22,TS*12],[TS*20,TS*11],[TS*25,TS*9],[TS*25,TS*13]];
   for(let i=0;i<3;i++){const e=mkEnemy(redSpawns[i][0],redSpawns[i][1],redDef[i],"tank",4000,95);e.team=1;e._bbRole="def";ENM.push(e)}
   for(let i=0;i<2;i++){const e=mkEnemy(redSpawns[3+i][0],redSpawns[3+i][1],redAtt[i],"shooter",3000,110);e.team=1;e._bbRole="att";ENM.push(e)}
   // 2 blue allies
   const blueSpawns=[[TS*12,TS*10],[TS*12,TS*12]];
-  const blueKeys=["POCO","COLT"];
+  const _bbPool=MM_LINEUP?.allies?.length?MM_LINEUP.allies:BD.map(b=>b.key).filter(k=>k!==PL.bdKey).sort(()=>Math.random()-.5);
+  const blueKeys=[_bbPool[0]||"POCO",_bbPool[1]||"COLT"];
   for(let i=0;i<2;i++){const a=mkEnemy(blueSpawns[i][0],blueSpawns[i][1],blueKeys[i],"agile",3500,100);a.team=0;a.friendly=true;a._bbRole="att";ENM.push(a)}
   PL.x=TS*10;PL.y=TS*11;
 }
@@ -6010,7 +6744,9 @@ function drawBrawlBallHUD(){
 
 function update(){
   T+=DT;
+  if(STATE==="home"||SHOW_NEWS)updateSkulls();
   if(STATE==="matchmaking")updateMatchmaking();
+  if(STATE==="starrdrop")updateStarrDrop();
   if(STATE==="win"||STATE==="lose")END_SHOW_T+=DT;
   if(STATE==="play"){
     updatePlayer();if(PL)updateEnemies();updateBullets();updatePar();updateDmg();updateStealth();
@@ -6147,9 +6883,11 @@ function render(){
   if(STATE==="home"){
     drawHomeScreen();
     if(SHOW_BRAWLERS){drawBrawlerCollection();return}
+    if(SHOW_NEWS){drawNewsScreen();return}
     return
   }
   if(STATE==="matchmaking"){drawMatchmaking();return}
+  if(STATE==="starrdrop"){drawStarrDropScreen();return}
   if(STATE==="shop"){drawShopScreen();return}
   if(STATE==="create"){drawCreateScreen();return}
   if(STATE==="upgrade"){drawUpgradeScreen();return}
@@ -6248,7 +6986,8 @@ function drawBrawlerImage(b,cx,cy,r){
     // Draw image centered and scaled to fit
     const scale=r*2/Math.min(img.naturalWidth,img.naturalHeight);
     const iw=img.naturalWidth*scale,ih=img.naturalHeight*scale;
-    X.drawImage(img,cx-iw/2,cy-ih/2,iw,ih);
+    const offsetY=r*0.15; // shift down so face is centered in circle
+    X.drawImage(img,cx-iw/2,cy-ih/2+offsetY,iw,ih);
     X.restore();
     // Border ring
     X.strokeStyle=ca(b.color,"CC");X.lineWidth=3;
