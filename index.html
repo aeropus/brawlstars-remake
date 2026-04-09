@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -71,14 +72,29 @@ if(!SAVE.gadgets)SAVE.gadgets={};          // {KEY: bool}
 if(!SAVE.starPowers)SAVE.starPowers={};    // {KEY: bool}
 if(!SAVE.activeGadget)SAVE.activeGadget={};// {KEY: bool equipped}
 if(!SAVE.activeStarPower)SAVE.activeStarPower={};
+// ── NEW: Hypercharge system ──
+if(!SAVE.hypercharges)SAVE.hypercharges={};// {KEY: bool unlocked}
+if(!SAVE.hyperchargeActive)SAVE.hyperchargeActive={}; // {KEY: bool equipped}
+// ── NEW: Gears system (Super Rare only for now) ──
+if(!SAVE.gears)SAVE.gears={}; // {KEY: {speed:bool, damage:bool, health:bool, shield:bool, vision:bool}}
+if(!SAVE.activeGears)SAVE.activeGears={}; // {KEY: [gearType1, gearType2]} - 2 slots at PL8 & PL10
+// ── NEW: Buffies system ──
+if(!SAVE.buffies)SAVE.buffies={}; // {KEY: {gadget:bool, star:bool, hyper:bool}}
+if(!SAVE.buffieCoins)SAVE.buffieCoins=1000; // Coins for claw machine pulls
+if(!SAVE.buffiePP)SAVE.buffiePP=2000; // Power Points for claw machine
 // ── NEW: Brawl Pass ──
 if(!SAVE.brawlPassSeason)SAVE.brawlPassSeason=1;
 if(!SAVE.brawlPassXP)SAVE.brawlPassXP=0;
 if(!SAVE.brawlPassTier||SAVE.brawlPassTier<1)SAVE.brawlPassTier=1;  // 1-70
 if(!SAVE.brawlPassPremium)SAVE.brawlPassPremium=false;
 if(!SAVE.brawlPassClaimed)SAVE.brawlPassClaimed=[];
+// ── NEW: Brawl Pass Vaults (Keys system) ──
+if(!SAVE.vaultKeys)SAVE.vaultKeys={resource:0,skin:0,brawler:0,buffie:0};
 // ── NEW: Starr Drops ──
 if(!SAVE.starrDrops)SAVE.starrDrops=0;
+if(!SAVE.chaosDrops)SAVE.chaosDrops=0; // More powerful Starr Drops
+if(!SAVE.hyperchargeDrops)SAVE.hyperchargeDrops=0; // Hypercharge-specific drops
+if(!SAVE.legendaryDrops)SAVE.legendaryDrops=0; // Legendary Starr Drops
 let EDITING_NAME=false,NAME_CURSOR=0;
 function persist(){saveData(SAVE)}
 
@@ -1338,6 +1354,25 @@ function inBush(x,y){const t=tileAt(x,y);return t===2}
 function updateShowdown(){
   if(!PL||PL.dead)return;
   const mapW=COLS*TS,mapH=ROWS*TS,cx=mapW/2,cy=mapH/2;
+  
+  // CRITICAL FIX: Energy Drink Modifier
+  if(SD_MODIFIERS.energyDrink.active){
+    SD_MODIFIERS.energyDrink.cooldown-=DT;
+    if(SD_MODIFIERS.energyDrink.cooldown<=0){
+      // Spawn Energy Drink every 10s
+      SD_MODIFIERS.energyDrink.cooldown=10;
+      const angle=Math.random()*6.28;
+      const dist=Math.random()*SD_POISON_R*.7;
+      const dx=cx+Math.cos(angle)*dist;
+      const dy=cy+Math.sin(angle)*dist;
+      SD_POWERUPS.push({
+        x:dx,y:dy,sc:0,bob:Math.random()*6.28,
+        val:0,collected:false,
+        isEnergyDrink:true,duration:6 // 6s boost
+      });
+    }
+  }
+  
   if(SD_POISON_R>0)SD_POISON_R=Math.max(0,SD_POISON_R-SD_POISON_SPEED*DT);
   const pdist=Math.hypot(PL.x-cx,PL.y-cy);
   if(pdist>SD_POISON_R&&SD_POISON_R<SD_POISON_MAX*.98){
@@ -1354,15 +1389,45 @@ function updateShowdown(){
   for(const p of SD_POWERUPS){
     if(p.collected)continue;
     p.sc=Math.min(1,(p.sc||0)+DT*4);p.bob=(p.bob||0)+DT*3;
-    if(dst(p,PL)<PL.r+18){
-      p.collected=true;PL.maxHp+=p.val;PL.hp=Math.min(PL.maxHp,PL.hp+p.val);
-      spawnDmg(p.x,p.y-20,"+"+p.val+" HP","#FFD700",1.3);
-      burst(p.x,p.y,"#FFD700","#FF8800",12,.6);snd("gem");earnCoins(5,p.x,p.y-18,"+5");
+    
+    // Energy Drink pickup
+    if(p.isEnergyDrink&&dst(p,PL)<PL.r+18){
+      p.collected=true;
+      PL.spdBoost=p.duration;
+      PL._energyDrinkDmg=p.duration; // Damage boost tracker
+      spawnDmg(PL.x,PL.y-30,"⚡ ENERGY!","#FF00FF",1.5);
+      burst(p.x,p.y,"#FF00FF","#AA00AA",16,.8);snd("gem");
     }
+    // Normal Power Cube pickup
+    else if(!p.isEnergyDrink&&dst(p,PL)<PL.r+18){
+      p.collected=true;
+      // FIX #6: Power Cubes give +10% HP & Damage (multiplicative)
+      const oldMaxHp = PL.maxHp;
+      PL.maxHp = Math.round(PL.maxHp * 1.10); // +10% max HP
+      PL.hp = Math.min(PL.maxHp, PL.hp + (PL.maxHp - oldMaxHp)); // Heal by the increase
+      PL._powerCubes = (PL._powerCubes || 0) + 1; // Track for damage boost
+      
+      const hpGain = PL.maxHp - oldMaxHp;
+      spawnDmg(p.x,p.y-20,`+${hpGain} HP`,"#FFD700",1.3);
+      burst(p.x,p.y,"#FFD700","#FF8800",12,.6);snd("gem");
+      // earnCoins disabled in FIX #3
+    }
+    
     for(const e of ENM){
       if(e.dead||p.collected||dst(p,e)>e.r+18)continue;
-      p.collected=true;e.maxHp=(e.maxHp||e.hp)+p.val;
-      e.hp=Math.min(e.maxHp,e.hp+p.val);e.powerups=(e.powerups||0)+1;
+      if(p.isEnergyDrink){
+        p.collected=true;
+        e.spdBoost=p.duration;
+        e._energyDrinkDmg=p.duration;
+      }else{
+        p.collected=true;
+        // FIX #6: Power Cubes +10% for enemies too
+        const oldMax = e.maxHp || e.hp;
+        e.maxHp = Math.round(oldMax * 1.10);
+        e.hp = Math.min(e.maxHp, e.hp + (e.maxHp - oldMax));
+        e.powerups = (e.powerups || 0) + 1;
+        e._powerCubes = (e._powerCubes || 0) + 1;
+      }
     }
   }
 }
@@ -1836,6 +1901,10 @@ function screenXY(t){const r=C.getBoundingClientRect();return{x:(t.clientX-r.lef
 C.addEventListener("touchstart",e=>{
   e.preventDefault();getAC();
   for(const t of e.changedTouches){
+    // Track touch start for UI scrolling (News, Brawler Collection, Shop)
+    if(STATE==="home"&&(SHOW_NEWS||SHOW_BRAWLERS)){
+      e._uiScrollId=t.identifier;e._uiScrollY=screenXY(t).y;continue;
+    }
     if(STATE!=="play"&&!SHOW_SELECT)continue; // all UI handled in touchend
     const s=screenXY(t); // always screen coords
     if(Math.hypot(s.x-SUPER_BTN.x,s.y-SUPER_BTN.y)<SUPER_BTN.r+14)continue; // super on touchend
@@ -1855,10 +1924,40 @@ C.addEventListener("touchstart",e=>{
     }
   }
 },{passive:false});
+let _uiScrollTouchId=null,_uiScrollLastY=0;
 C.addEventListener("touchmove",e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
     const s=screenXY(t); // screen coords throughout
+    // UI scroll for News / Brawler Collection / Shop
+    if(STATE==="home"&&SHOW_NEWS){
+      if(_uiScrollTouchId===null){_uiScrollTouchId=t.identifier;_uiScrollLastY=s.y;}
+      if(t.identifier===_uiScrollTouchId){
+        const dy=_uiScrollLastY-s.y;
+        NEWS_SCROLL=Math.max(0,Math.min(drawNewsScreen._maxScroll||999,NEWS_SCROLL+dy));
+        _uiScrollLastY=s.y;
+      }
+      continue;
+    }
+    if(STATE==="home"&&SHOW_BRAWLERS){
+      if(_uiScrollTouchId===null){_uiScrollTouchId=t.identifier;_uiScrollLastY=s.y;}
+      if(t.identifier===_uiScrollTouchId){
+        const dy=_uiScrollLastY-s.y;
+        BRAWLER_SCROLL=Math.max(0,Math.min(drawBrawlerCollection._maxScroll||999,BRAWLER_SCROLL+dy));
+        _uiScrollLastY=s.y;
+      }
+      continue;
+    }
+    if(STATE==="shop"){
+      if(_uiScrollTouchId===null){_uiScrollTouchId=t.identifier;_uiScrollLastY=s.y;}
+      if(t.identifier===_uiScrollTouchId){
+        const dy=_uiScrollLastY-s.y;
+        SHOP_SCROLL=Math.max(0,SHOP_SCROLL+dy);
+        _uiScrollLastY=s.y;
+      }
+      continue;
+    }
+    _uiScrollTouchId=null;
     if(t.identifier===LTOUCH_ID&&TOUCH.left){TOUCH.left.x=s.x;TOUCH.left.y=s.y}
     if(t.identifier===RTOUCH_ID&&TOUCH.right){TOUCH.right.x=s.x;TOUCH.right.y=s.y}
     if(t.identifier===SUPER_JOY_ID&&SUPER_JOY.active){SUPER_JOY.x=s.x;SUPER_JOY.y=s.y}
@@ -1917,6 +2016,7 @@ C.addEventListener("touchend",e=>{
 C.addEventListener("wheel",e=>{
   if(STATE==="shop"){SHOP_SCROLL=Math.max(0,SHOP_SCROLL+e.deltaY*.6);e.preventDefault()}
   if(STATE==="home"&&SHOW_BRAWLERS){BRAWLER_SCROLL=Math.max(0,Math.min(drawBrawlerCollection._maxScroll||999,BRAWLER_SCROLL+e.deltaY*.6));e.preventDefault()}
+  if(STATE==="home"&&SHOW_NEWS){NEWS_SCROLL=Math.max(0,Math.min(drawNewsScreen._maxScroll||999,NEWS_SCROLL+e.deltaY*.6));e.preventDefault()}
 },{passive:false});
 C.addEventListener("mousemove",e=>{const r=C.getBoundingClientRect();MX=(e.clientX-r.left)/SCL+(STATE==="play"?CAM_X:0);MY=(e.clientY-r.top)/SCL+(STATE==="play"?CAM_Y:0)});
 C.addEventListener("mousedown",e=>{if(e.button===0){MB=true;getAC()}});
@@ -1966,6 +2066,7 @@ addEventListener("keydown",e=>{
   }
   if(e.key==="Escape"){
     if(STATE==="matchmaking"){STATE="home";snd("select");return}
+    if(STATE==="home"&&SHOW_NEWS){SHOW_NEWS=false;return}
     if(STATE==="home"&&SHOW_BRAWLERS){SHOW_BRAWLERS=false;return}
     if(STATE==="settings"){STATE=SETTINGS_FROM;return}
     if(STATE==="create"){STATE="home";return}
@@ -1989,14 +2090,26 @@ const MODES=[
    desc:"Collect 10 gems to win!",
    descDE:"Sammle 10 Juwelen! Besiege Gegner.",
    color:"#00FFAA",dark:"#007755"},
+  {key:"bounty",    icon:"⭐",label:"Bounty",     labelDE:"Kopfgeld",
+   desc:"Earn stars by eliminating enemies! Most stars wins.",
+   descDE:"Verdiene Sterne durch Abschüsse! Team mit meisten Sternen gewinnt.",
+   color:"#FFD700",dark:"#AA8800"},
+  {key:"hotzone",   icon:"🔥",label:"Hot Zone",   labelDE:"Heiße Zone",
+   desc:"Control the zones! First to 100% wins.",
+   descDE:"Kontrolliere die Zonen! Erstes Team auf 100% gewinnt.",
+   color:"#FF6600",dark:"#AA3300"},
   {key:"knockout",  icon:"💀",label:"Knockout",   labelDE:"Knockout",
    desc:"3 lives. Last brawler standing wins!",
    descDE:"3 Leben. Letzter Brawler gewinnt!",
    color:"#FF4444",dark:"#881111"},
-  {key:"showdown",  icon:"⭐",label:"Showdown",   labelDE:"Showdown",
+  {key:"showdown",  icon:"🌟",label:"Showdown",   labelDE:"Showdown",
    desc:"Last one standing wins! 10 players, no respawns.",
    descDE:"Letzter Überlebender gewinnt! 10 Spieler, keine Wiederbelebung.",
-   color:"#FFD700",dark:"#886600"},
+   color:"#FFAA00",dark:"#886600"},
+  {key:"duoshowdown", icon:"👥",label:"Duo Showdown", labelDE:"Duo Showdown",
+   desc:"Battle Royale in teams of 2! 5 duos, last team wins.",
+   descDE:"Battle Royale in 2er-Teams! 5 Duos, letztes Team gewinnt.",
+   color:"#FF9500",dark:"#AA5500"},
   {key:"heist",     icon:"🏦",label:"Heist",       labelDE:"Tresorraub",
    desc:"Destroy the enemy safe! Defend yours.",
    descDE:"Zerstört den gegnerischen Tresor! Verteidigt euren.",
@@ -2530,7 +2643,7 @@ function drawNewsScreen(){
 }
 let SETTINGS_FROM="select";
 let END_SHOW_T=0;
-let MODE="gems"; // "gems" | "knockout"
+let MODE="gems"; // "gems" | "knockout" | "bounty" | "hotzone" | "showdown" | "heist" | "brawlball"
 // Knockout: each team has 3 lives, last team standing wins // seconds since win/lose state set (drives pop animation) // which state opened settings
 let PL,ENM=[],BUL=[],GEM=[],PAR=[],DNUM=[],KFEED=[];
 let WAVE=0,WANNOUNCE=0,WTEXT="",KILLS=0;
@@ -2544,6 +2657,15 @@ let GG_LEADING_TEAM=-1;              // 0 or 1
 let GG_MINE_TIMER=0;                 // spawn next gem in X seconds
 let GG_MATCH_TIMER=210;              // 3:30 match timer
 let GG_MAX_GEMS=29;                  // hard cap on map gems
+// Bounty
+let BOUNTY_STARS_BLUE=0,BOUNTY_STARS_RED=0; // team star counts
+let BOUNTY_PLAYER_STARS=0; // stars on player's head
+let BOUNTY_TIMER=150; // 2:30 match timer
+let BOUNTY_STAR_VALUES={}; // {entityId: starValue} - stars on each player/enemy
+// Hot Zone
+let HZ_ZONES=[]; // {x,y,w,h,control:0} control: -1=red, 0=neutral, 1=blue
+let HZ_PROGRESS_BLUE=0,HZ_PROGRESS_RED=0; // 0-100%
+let HZ_TIMER=180; // 3:00 match timer
 // Knockout  
 let KO_ROUND=1;                      // current round (1-3)
 let KO_WINS_BLUE=0,KO_WINS_RED=0;    // rounds won
@@ -2563,6 +2685,16 @@ let SD_POISON_MAX=0;      // initial radius (set on init)
 let SD_POWERUPS=[];       // {x,y,sc,bob,val,collected}
 let SD_ALIVE=10;          // players still alive (1 PL + 9 bots)
 let SD_RANK=10;           // player's final rank
+// Duo Showdown state
+let DUO_SD_ALIVE=5;       // teams still alive (5 duos)
+let DUO_SD_RANK=5;        // duo's final rank
+let DUO_SD_PARTNER=null;  // partner bot entity
+// Showdown Modifiers
+let SD_MODIFIERS={
+  energyDrink:{active:false,spawns:[],cooldown:0}, // Speed+Damage buff pickups
+  meteors:{active:false,timer:0,intensity:0}, // Falling meteors
+  healingMushrooms:{active:false,spawns:[]} // Heal over time zones
+};
 // ── HEIST ──────────────────────────────────────────────────
 // Two safes: blue (team 0) defended by player, red (team 1) attacked
 let HS_BLUE={hp:0,maxHp:0,x:0,y:0,r:38,invT:0,shakeT:0,pushT:0,lastPct:1};
@@ -2645,9 +2777,11 @@ const WAVES=[
 ];
 
 function earnCoins(amount,x,y,label){
-  SAVE.coins+=amount;SESSION_COINS+=amount;persist();
-  if(x!==undefined)COIN_TOASTS.push({x,y,amount,label,life:1.4,maxL:1.4,vy:-55});
-  snd("coin");
+  // FIX #3: NO coin rewards during gameplay! Coins only from Brawl Pass/Mastery
+  // SAVE.coins+=amount;SESSION_COINS+=amount;persist();
+  // Still show visual feedback but don't actually give coins
+  if(x!==undefined)COIN_TOASTS.push({x,y,amount:0,label:"",life:1.4,maxL:1.4,vy:-55});
+  // snd("coin"); // No coin sound either
 }
 
 function init(){
@@ -2697,8 +2831,8 @@ function init(){
     PL.x=360;PL.y=552;
     GEM=[];
   } else
-  // Gem Grab / Knockout: set up 2 teams of 3
-  if(MODE==="gems"||MODE==="knockout"){
+  // Gem Grab / Knockout / Bounty / Hot Zone: set up 2 teams of 3
+  if(MODE==="gems"||MODE==="knockout"||MODE==="bounty"||MODE==="hotzone"){
     const _ggEPool=MM_LINEUP?.enemies?.length?MM_LINEUP.enemies:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5);
     const _ggTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"shooter",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive"};
     const eTeam=_ggEPool.slice(0,5);
@@ -2714,11 +2848,52 @@ function init(){
     // Blue allies (2, team=0, won't attack player)
     for(let i=0;i<2;i++){const a=mkEnemy(friendlySpawns[i][0],friendlySpawns[i][1],friendlyKeys[i],"agile",3500,100);a.team=0;a.friendly=true;ENM.push(a);}
     if(MODE==="knockout"){KO_ALIVE_BLUE=3;KO_ALIVE_RED=3;}
+    // Bounty mode initialization
+    if(MODE==="bounty"){
+      BOUNTY_STARS_BLUE=0;BOUNTY_STARS_RED=0;
+      BOUNTY_PLAYER_STARS=0;BOUNTY_TIMER=150;
+      BOUNTY_STAR_VALUES={};
+      // Initialize star values (everyone starts with 0)
+      PL._starValue=0;
+      ENM.forEach(e=>e._starValue=0);
+    }
+    // Hot Zone initialization
+    if(MODE==="hotzone"){
+      HZ_PROGRESS_BLUE=0;HZ_PROGRESS_RED=0;HZ_TIMER=180;
+      // Create 1-2 zones in center area
+      HZ_ZONES=[
+        {x:TS*13,y:TS*9,w:TS*6,h:TS*4,control:0}, // center zone
+      ];
+    }
     // Gem mine: clear GEM array, gems spawn from mine
     GEM=[];
   } else if(MODE==="showdown"){
     SD_ALIVE=10;SD_RANK=10;SD_POWERUPS=[];SD_CRATE_HP={};
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){if(SHOWDOWN_MAP[r][c]===7)SD_CRATE_HP[sdCrateKey(r,c)]=300;}
+    
+    // CRITICAL FIX: Spawn static Power Cube boxes on map (25-30 boxes)
+    const boxSpots=[
+      [5,5],[10,5],[15,5],[20,5],[25,5],[30,5],
+      [3,8],[8,8],[13,8],[18,8],[23,8],[28,8],
+      [5,11],[10,11],[15,11],[20,11],[25,11],[30,11],
+      [3,14],[8,14],[13,14],[18,14],[23,14],[28,14],
+      [5,17],[10,17],[15,17],[20,17],[25,17],[30,17]
+    ];
+    boxSpots.forEach(([c,r])=>{
+      // Only place box if not on wall/water
+      const tv=SHOWDOWN_MAP[r]?.[c];
+      if(tv!==undefined&&tv!==1&&tv!==3&&tv!==7){
+        // Place power cube box (value = 1 power cube = +10% dmg & hp)
+        SD_POWERUPS.push({
+          x:c*TS+TS/2,y:r*TS+TS/2,
+          sc:0,bob:Math.random()*6.28,
+          val:100,// 100 = 1 power cube
+          collected:false,
+          isBox:true// Mark as static box
+        });
+      }
+    });
+    
     const _mW=COLS*TS,_mH=ROWS*TS;
     SD_POISON_MAX=Math.sqrt((_mW/2)*(_mW/2)+(_mH/2)*(_mH/2))*1.05;
     SD_POISON_R=SD_POISON_MAX;SD_POISON_SPEED=SD_POISON_MAX/120;
@@ -2729,11 +2904,58 @@ function init(){
     ENM=[];
     for(let i=0;i<9;i++){const[sc,sr]=sp[i+1];const bot=mkEnemy(TS*sc+TS/2,TS*sr+TS/2,bk[i],bt[i],3000+Math.random()*2000,85+Math.random()*40);bot.powerups=0;bot.team=-1;ENM.push(bot);}
     PL.x=TS*sp[0][0]+TS/2;PL.y=TS*sp[0][1]+TS/2;CAM_X=PL.x-W/2;CAM_Y=PL.y-H/2;
+  } else if(MODE==="duoshowdown"){
+    // DUO SHOWDOWN: 5 teams of 2 (10 players total)
+    DUO_SD_ALIVE=5;DUO_SD_RANK=5;SD_POWERUPS=[];SD_CRATE_HP={};
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){if(SHOWDOWN_MAP[r][c]===7)SD_CRATE_HP[sdCrateKey(r,c)]=300;}
+    
+    // Spawn Power Cube boxes
+    const boxSpots=[
+      [5,5],[10,5],[15,5],[20,5],[25,5],[30,5],
+      [3,8],[8,8],[13,8],[18,8],[23,8],[28,8],
+      [5,11],[10,11],[15,11],[20,11],[25,11],[30,11],
+      [3,14],[8,14],[13,14],[18,14],[23,14],[28,14],
+      [5,17],[10,17],[15,17],[20,17],[25,17],[30,17]
+    ];
+    boxSpots.forEach(([c,r])=>{
+      const tv=SHOWDOWN_MAP[r]?.[c];
+      if(tv!==undefined&&tv!==1&&tv!==3&&tv!==7){
+        SD_POWERUPS.push({x:c*TS+TS/2,y:r*TS+TS/2,sc:0,bob:Math.random()*6.28,val:100,collected:false,isBox:true});
+      }
+    });
+    
+    const _mW=COLS*TS,_mH=ROWS*TS;
+    SD_POISON_MAX=Math.sqrt((_mW/2)*(_mW/2)+(_mH/2)*(_mH/2))*1.05;
+    SD_POISON_R=SD_POISON_MAX;SD_POISON_SPEED=SD_POISON_MAX/120;
+    const _sdTypeMap={BULL:"tank",FRANK:"tank",ROSA:"tank",JACKY:"tank",EL_PRIMO:"tank",BROCK:"shooter",COLT:"shooter",PIPER:"shooter",DYNA:"mortar",TICK:"shooter",TARA:"aggressive",MORTIS:"aggressive",LEON:"agile",CROW:"agile",MAX:"agile",EDGAR:"aggressive",SHELLY:"shooter",SPIKE:"shooter",POCO:"agile",SANDY:"aggressive",BIBI:"aggressive",GENE:"shooter",EMZ:"shooter",MR_P:"shooter",NITA:"tank",PAM:"shooter",LILY:"agile",LOLA:"aggressive",COLETTE:"shooter"};
+    const bk=MM_LINEUP?.bots?.length?MM_LINEUP.bots:BD.map(b=>b.key).filter(k=>k!==BD[SEL].key).sort(()=>Math.random()-.5).slice(0,8);
+    const bt=bk.map(k=>_sdTypeMap[k]||"shooter");
+    // 5 teams spawn positions (player team + 4 enemy duos = 5 duos total)
+    const sp=[[13,11],[12,11],[7,2],[8,2],[23,2],[24,2],[1,18],[2,18],[20,18],[21,18]];
+    ENM=[];
+    // Create player's partner (team 0)
+    const partnerKey=bk[0];
+    DUO_SD_PARTNER=mkEnemy(TS*sp[1][0]+TS/2,TS*sp[1][1]+TS/2,partnerKey,"agile",3500,100);
+    DUO_SD_PARTNER.team=0;DUO_SD_PARTNER.friendly=true;DUO_SD_PARTNER.powerups=0;DUO_SD_PARTNER._duoPartner=true;
+    ENM.push(DUO_SD_PARTNER);
+    // Create 4 enemy duos (8 bots, teams 1-4)
+    for(let teamId=1;teamId<=4;teamId++){
+      for(let j=0;j<2;j++){
+        const idx=(teamId-1)*2+j;
+        const[sc,sr]=sp[idx+2];
+        const bot=mkEnemy(TS*sc+TS/2,TS*sr+TS/2,bk[idx+1]||"COLT",bt[idx+1]||"shooter",3000+Math.random()*2000,85+Math.random()*40);
+        bot.powerups=0;bot.team=teamId;bot._duoTeamId=teamId;bot._duoPartnerIdx=j;
+        ENM.push(bot);
+      }
+    }
+    PL.x=TS*sp[0][0]+TS/2;PL.y=TS*sp[0][1]+TS/2;PL._duoPartner=true;
+    CAM_X=PL.x-W/2;CAM_Y=PL.y-H/2;
   } else if(MODE==="brawlball"){
     initBrawlBall();
   } else {ENM=WAVES[0].map(fn=>fn());}
   BUL=[];GEM=[];PAR=[];DNUM=[];KFEED=[];spawnBushes();
-  for(const[col,row]of GEM_SPOTS)GEM.push({x:col*TS+TS/2,y:row*TS+TS/2,collected:false,bob:Math.random()*6.28,sc:0});
+  // FIX #1: NO initial gems! Only Gem Mine spawns them in Gem Grab
+  // (Gems only spawn from enemies in other modes)
   annWave(1);snd("wave");
 }
 function annWave(n){WANNOUNCE=3;WTEXT=t("waveAnn",n,WAVES.length)}
@@ -2751,7 +2973,13 @@ function dst(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
 
 /* ═══ FIRE WEAPON ═══ */
 function fireWeapon(){
-  const a=PL.angle,{wType,dmg,rLife,color,dark}=PL;
+  const a=PL.angle,{wType,rLife,color,dark,bdKey}=PL;
+  // CRITICAL FIX: Apply Power Level multiplier to damage
+  const baseDmg=PL.dmg;
+  const plMultiplier=getBrawlerMultiplier(bdKey);
+  // FIX #6: Apply Power Cube damage boost (+10% per cube)
+  const powerCubeMultiplier = Math.pow(1.10, PL._powerCubes || 0);
+  const dmg=Math.round(baseDmg*plMultiplier*powerCubeMultiplier);
   const fb=(ang,sp,dm,r2=6,sc2=1.4,ign=false)=>fireBul(PL.x,PL.y,ang,sp,dm,color,dark,"player",r2,sc2,rLife,ign);
   switch(wType){
     case"shotgun":fb(a,460,dmg,6,1.4);fb(a+.22,440,dmg*.75,5,1.2);fb(a-.22,440,dmg*.75,5,1.2);break;
@@ -2778,11 +3006,35 @@ function fireWeapon(){
   }
 }
 function fireSuper(){
-  const a=PL.angle,{color,dark,bdKey,dmg}=PL;
-  // ── HYPERCHARGE: activates if PL9+ and random 15% chance on super fire ──
-  const hyperAvail=getPowerLevel(bdKey)>=9&&!PL._hyperActive&&Math.random()<0.15;
-  if(hyperAvail){PL._hyperActive=true;PL._hyperT=4;spawnDmg(PL.x,PL.y-55,"⚡ HYPERCHARGE!","#FFD700",1.6);SHK=.4;burst(PL.x,PL.y,"#FFD700","#FF8800",30,1.2)}
-  const hyperMult=PL._hyperActive?1.4:1;
+  const a=PL.angle,{color,dark,bdKey}=PL;
+  // CRITICAL FIX: Apply Power Level multiplier to Super damage
+  const baseDmg=PL.dmg;
+  const plMultiplier=getBrawlerMultiplier(bdKey);
+  // FIX #6: Apply Power Cube damage boost (+10% per cube)
+  const powerCubeMultiplier = Math.pow(1.10, PL._powerCubes || 0);
+  const dmg=Math.round(baseDmg*plMultiplier*powerCubeMultiplier);
+  
+  // FIX #4: CORRECT HYPERCHARGE MECHANIC (April 2026)
+  // Hypercharge charges by using Super (33% per use = 3 Supers needed)
+  // NOT random! Only if Power Level 11 and has Hypercharge unlocked
+  if(!PL.hyperchargeMeter) PL.hyperchargeMeter = 0;
+  
+  const hasHypercharge = getPowerLevel(bdKey) >= 11 && SAVE.hypercharges[bdKey];
+  if(hasHypercharge && !PL._hyperActive) {
+    PL.hyperchargeMeter += 33; // +33% per Super use
+    
+    if(PL.hyperchargeMeter >= 100) {
+      // Hypercharge ready!
+      PL.hyperchargeMeter = 0;
+      PL._hyperActive = true;
+      PL._hyperT = 4; // 4 second duration
+      spawnDmg(PL.x,PL.y-55,"⚡ HYPERCHARGE!","#FFD700",1.6);
+      SHK=.4;
+      burst(PL.x,PL.y,"#FFD700","#FF8800",30,1.2);
+    }
+  }
+  
+  const hyperMult=PL._hyperActive?1.4:1; // +40% damage when active
   snd("super");PL.sup=0;PL.supCD=5;
   if(bdKey==="SHELLY"){for(let i=0;i<14;i++)fireBul(PL.x,PL.y,a+(i/13-.5)*.88,440*hyperMult,dmg*1.5*hyperMult,color,dark,"player",7,1.5,1.5);SHK=.35}
   else if(bdKey==="COLT"){for(let i=0;i<16;i++){const ai=a+(i%2?.06:-.06);setTimeout(()=>fireBul(PL.x,PL.y,ai,540*hyperMult,dmg*hyperMult,color,dark,"player",4,1.1,1.9),i*60)}}
@@ -3057,10 +3309,39 @@ function updateEnemies(){
     if(e.hp<=0){
       e.dead=true;KILLS++;SAVE.totalKills++;
       addBrawlPassXP(20+WAVE*5);
+      
+      // BOUNTY MODE: Award stars to killer
+      if(MODE==="bounty"){
+        // Enemy killed by player's team
+        if(e.team===1){
+          const starsEarned=(e._starValue||0)+1; // Base 1 star + bounty on their head
+          BOUNTY_STARS_BLUE+=starsEarned;
+          spawnDmg(e.x,e.y-40,`⭐ +${starsEarned}`,` #FFD700`,1.3);
+          // Reset enemy's star value
+          e._starValue=0;
+        }
+        // Ally killed by red team (shouldn't happen often but handle it)
+        else if(e.team===0){
+          const starsLost=(e._starValue||0)+1;
+          BOUNTY_STARS_RED+=starsLost;
+          e._starValue=0;
+        }
+      }
+      
       for(let _i=0;_i<(e.gems||0);_i++){const _a=Math.random()*6.28,_r=15+Math.random()*30;GEM.push({x:e.x+Math.cos(_a)*_r,y:e.y+Math.sin(_a)*_r,collected:false,bob:Math.random()*6.28,sc:0,team:-1});}
       if(MODE==="gems"&&e.gems>0){if(e.team===1)GG_GEMS_RED=Math.max(0,GG_GEMS_RED-e.gems);else GG_GEMS_BLUE=Math.max(0,GG_GEMS_BLUE-e.gems);e.gems=0;}
       if(MODE==="knockout"){if(e.team===1)KO_ALIVE_RED--;else if(e.team===0)KO_ALIVE_BLUE--;}
-      if(MODE==="gems"&&e.team===0&&e.friendly){e._respawnT=3;}
+      
+      // FIX #2: Respawn mechanics - Knockout NO respawns! Other 3v3 modes 3s respawn
+      if(MODE==="knockout"){
+        // KNOCKOUT: NO RESPAWNS! Dead is dead for the round
+        // (handled by KO_ALIVE counters above)
+      }
+      else if(["gems","bounty","hotzone","heist","brawlball"].includes(MODE)){
+        // All other 3v3 modes: 3 second respawn for allies
+        if(e.team===0&&e.friendly){e._respawnT=3;}
+      }
+      
       if(MODE==="showdown"){SD_ALIVE--;const drops=(e.powerups||0)+1+Math.floor(Math.random()*2);for(let _i=0;_i<drops;_i++){const _a=Math.random()*6.28,_r=20+Math.random()*35;SD_POWERUPS.push({x:e.x+Math.cos(_a)*_r,y:e.y+Math.sin(_a)*_r,sc:0,bob:Math.random()*6.28,val:100+Math.floor(Math.random()*150),collected:false});}}
       burst(e.x,e.y,e.color,e.dark,26,1.15);snd("death");
       KFEED.unshift({name:e.name,t:3.5,color:e.color});if(KFEED.length>4)KFEED.pop();
@@ -3069,15 +3350,43 @@ function updateEnemies(){
       for(let i=0;i<n;i++){const a2=Math.random()*6.28,r2=20+Math.random()*45;GEM.push({x:e.x+Math.cos(a2)*r2,y:e.y+Math.sin(a2)*r2,collected:false,bob:Math.random()*6.28,sc:0})}
     }
   }
+  
+  // FIX #5: WIN CONDITIONS - Only Knockout and Showdown end on "kill all"
+  // Gem Grab, Bounty, Hot Zone, Heist, Brawl Ball have timer/objective wins
   const redAliveCount=ENM.filter(e=>!e.dead&&(e.team===1||e.team===-1)).length;
   if(redAliveCount===0&&ENM.length>0&&T>2){
-    if(MODE==="knockout"||MODE==="showdown"||MODE==="gems"){
-      // Last red standing dead → Sieg!
+    // Only these modes win by elimination:
+    if(MODE==="knockout"||MODE==="showdown"){
+      // Knockout/Showdown: Kill all = Win
       setTimeout(()=>endGame(true),800);
-    } else if(MODE!=="gems"&&MODE!=="knockout"&&WAVE<WAVES.length-1){
+    }
+    // Gem Grab: Won by countdown (handled in updateGemGrab)
+    // Bounty: Won by timer (handled below)
+    // Hot Zone: Won by 100% control (handled below)
+    // Heist: Won by safe destruction or timer
+    // Brawl Ball: Won by goals
+    else if(MODE!=="gems"&&MODE!=="knockout"&&MODE!=="bounty"&&MODE!=="hotzone"&&WAVE<WAVES.length-1){
       WAVE++;annWave(WAVE+1);snd("wave");
       earnCoins(100,W/2,H/2-40,"🌊 +100");
       setTimeout(()=>WAVES[WAVE].map(fn=>fn()).forEach(e=>ENM.push(e)),1600);
+    }
+  }
+  
+  // BOUNTY: Timer end → team with most stars wins
+  if(MODE==="bounty"&&BOUNTY_TIMER<=0){
+    if(BOUNTY_STARS_BLUE>BOUNTY_STARS_RED){setTimeout(()=>endGame(true),500);}
+    else if(BOUNTY_STARS_RED>BOUNTY_STARS_BLUE){setTimeout(()=>endGame(false),500);}
+    else{setTimeout(()=>endGame(false),500);} // Draw = loss
+  }
+  
+  // HOT ZONE: First to 100% wins
+  if(MODE==="hotzone"){
+    if(HZ_PROGRESS_BLUE>=100){setTimeout(()=>endGame(true),500);}
+    else if(HZ_PROGRESS_RED>=100){setTimeout(()=>endGame(false),500);}
+    else if(HZ_TIMER<=0){
+      // Timeout: team with more progress wins
+      if(HZ_PROGRESS_BLUE>HZ_PROGRESS_RED){setTimeout(()=>endGame(true),500);}
+      else{setTimeout(()=>endGame(false),500);}
     }
   }
 }
@@ -3129,7 +3438,8 @@ function updateBullets(){
           if(ae.dead||ae.invT>0)continue;
           // In showdown: hit any other entity; in team modes: only hit team 0 allies
           if(MODE!=="showdown"&&ae.team!==0)continue;
-          if(MODE==="showdown"&&b.ownerRef&&ae===b.ownerRef)continue; // no self-hit
+          // CRITICAL FIX: Prevent self-damage in ALL modes
+          if(b.ownerRef&&ae===b.ownerRef)continue; // no self-hit
           if(dst(b,ae)<ae.r+b.r){
             ae.hp-=b.dmg;ae.invT=.15;ae.flashT=.07;
             spark(ae.x,ae.y,"#FF6644");spawnDmg(ae.x,ae.y-28,`-${Math.round(b.dmg)}`,"#FF9955");
@@ -3196,21 +3506,31 @@ function endGame(won){
   const newRank=getRank(SAVE.trophies);
   if(newRank>oldRank){window._rankUp=newRank;window._rankUpCol=getRankColor(newRank);}
   else{window._rankUp=0;}
-  // Award Brawl Pass XP — balanced: ~10-15 matches per tier
-  const bpXP=won?(30+KILLS*3):(10+KILLS*1);
+  
+  // FIX #3: REALISTIC REWARDS (April 2026)
+  // Brawl Pass XP: 15-25 for win, 8-12 for loss
+  const baseXP = MODE === "showdown" ? (won ? 22 : 10) : (won ? 18 : 10);
+  const killBonus = Math.min(KILLS, 5) * 2; // Max +10 XP from kills
+  const bpXP = baseXP + killBonus;
   addBrawlPassXP(bpXP);
-  // Award power points for active brawler
-  const ppGain=won?(8+KILLS*2):(2+KILLS);
+  
+  // Power Points: Much lower (Starr Drops are main source)
+  const ppGain = won ? (Math.floor(Math.random()*3)+2) : (Math.floor(Math.random()*2)+1); // 2-4 win, 1-2 loss
   const bkey=BD[SEL]?.key||'SHELLY';
   SAVE.powerPoints[bkey]=(SAVE.powerPoints[bkey]||0)+ppGain;
   window._ppGained=ppGain;
-  // Award Starr Drop every 3 wins
+  
+  // Award Starr Drop every 3 wins (unchanged - good system)
   if(won){
     SAVE.totalWins++;
     if(SAVE.totalWins%3===0){SAVE.starrDrops++;window._gotDrop=true}else{window._gotDrop=false}
   }
+  
+  // FIX #3: NO COIN REWARDS! (disabled in earnCoins function)
+  // Original: earnCoins(300,W/2,H/2-60,"🏆 +300");
+  // Coins only from Brawl Pass and Mastery system
+  
   if(won){
-    earnCoins(300,W/2,H/2-60,"🏆 +300");
     const gemsWon=3+KILLS;earnGems(gemsWon);
     setTimeout(()=>COIN_TOASTS.push({x:W/2,y:H/2-90,amount:gemsWon,label:`💎 +${gemsWon}`,life:2,maxL:2,vy:-40}),400);
     persist();
