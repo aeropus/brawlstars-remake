@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Brawl Rush</title>
+<title>Brawl Rush V10</title>
 <link href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -146,6 +145,8 @@ const GADGETS={
   GENE:   {name:"Ollies Oblation",nameDE:"Ollies Gabe",desc:"Heilt alle Verbündeten um 700 HP",icon:"🧞",cooldown:8},
   MAX:    {name:"Sneaky Sneakers",nameDE:"Schleichschuhe",desc:"Kurzes 3s Unsichtbarkeits-Sprint",icon:"👟",cooldown:6},
   MR_P:   {name:"Porters Deployment",nameDE:"Porter-Einsatz",desc:"Spawnt sofort 2 Porter",icon:"🧳",cooldown:7},
+  STU:    {name:"Nitro Boost",nameDE:"Nitro-Boost",desc:"Sofort +50% Geschwindigkeit für 2s",icon:"🏎",cooldown:5},
+  BUZZ:   {name:"Reserve Buoy",nameDE:"Reserve-Boje",desc:"Setzt Schild für 1.5s, absorbiert 2000 Schaden",icon:"🛡",cooldown:8},
 };
 const STAR_POWERS={
   SHELLY: {name:"Shell Shock",nameDE:"Schrot-Schock",desc:"Feinde durch Super werden verlangsamt",icon:"🐚"},
@@ -174,6 +175,8 @@ const STAR_POWERS={
   MAX:    {name:"Run n Gun",nameDE:"Rennen & Schießen",desc:"Nachladen während Rennen",icon:"🏃"},
   MR_P:   {name:"Mr. Familiar",nameDE:"Mr. Vertraut",desc:"Porter haben mehr HP und Schaden",icon:"🎩"},
   EDGAR:  {name:"Fisticuffs",nameDE:"Schlägerei",desc:"Schaden nehmen lädt Super auf; +50% Heilung pro Treffer",icon:"🥊"},
+  STU:    {name:"Zero Drag",nameDE:"Null-Widerstand",desc:"Super lädt sich 50% schneller auf beim Treffen",icon:"🔥"},
+  BUZZ:   {name:"Eyes Sharp",nameDE:"Scharfe Augen",desc:"Super-Reichweite in Büschen verdoppelt",icon:"👁"},
 };
 // Gadget cooldowns state
 let GADGET_CD=0;
@@ -207,6 +210,8 @@ function applyGadget(){
   else if(key==="BIBI"){PL.hp=Math.min(PL.maxHp,PL.hp+2000);snd("heal");burst(PL.x,PL.y,"#FF6655","#BB2211",16,.8)}
   else if(key==="MAX"){PL.spdBoost=3;PL.stealth=2;spawnDmg(PL.x,PL.y-30,"STEALTH!","#FF3399")}
   else if(key==="MR_P"){const a2=a;for(let i=0;i<2;i++){setTimeout(()=>{const mx=PL.x+Math.cos(a2+i*.4)*80,my=PL.y+Math.sin(a2+i*.4)*80;if(!blocked(mx,my)){const m=mkEnemy(mx,my,"COLT","agile",800,220);m.team=0;m.friendly=true;m._ttl=6;ENM.push(m);burst(mx,my,PL.color,PL.dark,10,.5)}},i*200)}}
+  else if(key==="STU"){PL.spdBoost=2;PL.vx=Math.cos(a)*700;PL.vy=Math.sin(a)*700;burst(PL.x,PL.y,"#FF8833","#CC4400",16,.7);spawnDmg(PL.x,PL.y-30,"NITRO!","#FF8833")}
+  else if(key==="BUZZ"){PL._shieldT=1.5;PL._shieldHp=2000;burst(PL.x,PL.y,"#00CCFF","#0066AA",16,.7);spawnDmg(PL.x,PL.y-30,"SHIELD!","#00CCFF")}
   else{PL.spdBoost=2;burst(PL.x,PL.y,PL.color,PL.dark,14,.6)}
   burst(PL.x,PL.y,PL.color,PL.dark,10,.4);
 }
@@ -217,18 +222,20 @@ let SHOP_TAB=0;
 let SHOP_SCROLL=0;
 
 const SHOP_ITEMS_STATIC=[
-  // Recommended / daily deals
-  {id:"coins_small",  tab:0, name:"Münzen",      desc:"200 Münzen",      price:20,  currency:"gems", reward:"coins",  val:200,  icon:"🪙", color:"#FFD700", rarity:"COMMON"},
-  {id:"coins_med",    tab:0, name:"Münzen",       desc:"500 Münzen",      price:45,  currency:"gems", reward:"coins",  val:500,  icon:"🪙", color:"#FFD700", rarity:"COMMON"},
-  {id:"coins_big",    tab:0, name:"Münzen",       desc:"1500 Münzen",     price:120, currency:"gems", reward:"coins",  val:1500, icon:"🪙", color:"#FFD700", rarity:"RARE"},
-  {id:"gems_small",   tab:0, name:"Gems",         desc:"30 Gems",         price:80,  currency:"coins",reward:"gems",   val:30,   icon:"💎", color:"#44FF88", rarity:"RARE"},
-  {id:"pp_pack",      tab:0, name:"Power-Punkte", desc:"200 PP",          price:60,  currency:"gems", reward:"pp",     val:200,  icon:"⚡", color:"#FF8800", rarity:"RARE"},
-  {id:"drop_pack",    tab:0, name:"Starr Drop",   desc:"3 Drops",         price:90,  currency:"gems", reward:"drops",  val:3,    icon:"📦", color:"#FF44AA", rarity:"EPIC"},
+  // Empfohlen
+  {id:"coins_small",  tab:0, name:"Münzen",       desc:"200 Münzen",       price:20,  currency:"gems", reward:"coins",      val:200,  icon:"🪙", color:"#FFD700", rarity:"COMMON"},
+  {id:"coins_med",    tab:0, name:"Münzen",        desc:"500 Münzen",       price:45,  currency:"gems", reward:"coins",      val:500,  icon:"🪙", color:"#FFD700", rarity:"COMMON"},
+  {id:"coins_big",    tab:0, name:"Münzen",        desc:"1500 Münzen",      price:120, currency:"gems", reward:"coins",      val:1500, icon:"🪙", color:"#FFD700", rarity:"RARE"},
+  {id:"gems_small",   tab:0, name:"Gems",          desc:"30 Gems",          price:80,  currency:"coins",reward:"gems",       val:30,   icon:"💎", color:"#44FF88", rarity:"RARE"},
+  {id:"pp_pack",      tab:0, name:"Power-Punkte",  desc:"200 PP",           price:60,  currency:"gems", reward:"pp",         val:200,  icon:"⚡", color:"#FF8800", rarity:"RARE"},
+  {id:"starr_open",   tab:0, name:"Starr Drop",    desc:"Sofort öffnen",    price:50,  currency:"gems", reward:"open_starr", val:1,    icon:"📦", color:"#FF44AA", rarity:"EPIC",      instantOpen:true},
+  {id:"chaos_open",   tab:0, name:"Chaos Drop",    desc:"Sofort öffnen",    price:80,  currency:"gems", reward:"open_chaos", val:1,    icon:"🌀", color:"#FF6600", rarity:"LEGENDARY", instantOpen:true, isChaos:true},
   // Deals
-  {id:"deal_coins",   tab:1, name:"Mega Münzen",  desc:"2000 Münzen",     price:50,  currency:"gems", reward:"coins",  val:2000, icon:"🪙", color:"#FFD700", rarity:"RARE",   deal:true, discount:20},
-  {id:"deal_gems",    tab:1, name:"Gem Bundle",   desc:"100 Gems",        price:200, currency:"coins",reward:"gems",   val:100,  icon:"💎", color:"#44FF88", rarity:"EPIC",   deal:true, discount:15},
-  {id:"deal_drops",   tab:1, name:"Drop Bundle",  desc:"5 Starr Drops",   price:130, currency:"gems", reward:"drops",  val:5,    icon:"📦", color:"#FF44AA", rarity:"EPIC",   deal:true, discount:25},
-  {id:"deal_pp",      tab:1, name:"PP Mega",      desc:"500 PP",          price:110, currency:"gems", reward:"pp",     val:500,  icon:"⚡", color:"#FF8800", rarity:"MYTHIC", deal:true, discount:30},
+  {id:"deal_coins",   tab:1, name:"Mega Münzen",   desc:"2000 Münzen",      price:50,  currency:"gems", reward:"coins",      val:2000, icon:"🪙", color:"#FFD700", rarity:"RARE",      deal:true, discount:20},
+  {id:"deal_gems",    tab:1, name:"Gem Bundle",    desc:"100 Gems",         price:200, currency:"coins",reward:"gems",       val:100,  icon:"💎", color:"#44FF88", rarity:"EPIC",      deal:true, discount:15},
+  {id:"deal_drops",   tab:1, name:"Drop Bundle",   desc:"5× Starr Drop",    price:200, currency:"gems", reward:"drops",      val:5,    icon:"📦", color:"#FF44AA", rarity:"EPIC",      deal:true, discount:20},
+  {id:"deal_chaos",   tab:1, name:"Chaos Bundle",  desc:"3× Chaos Drop",    price:220, currency:"gems", reward:"chaosdrops", val:3,    icon:"🌀", color:"#FF3300", rarity:"LEGENDARY", deal:true, discount:8},
+  {id:"deal_pp",      tab:1, name:"PP Mega",       desc:"500 PP",           price:110, currency:"gems", reward:"pp",         val:500,  icon:"⚡", color:"#FF8800", rarity:"MYTHIC",    deal:true, discount:30},
 ];
 // Brawler items generated lazily after BD is defined
 function getShopItems(){
@@ -389,6 +396,37 @@ function drawShopScreen(){
       // Rarity label
       X.fillStyle=R.color;X.font=`bold 9px "Lilita One"`;
       X.fillText("★ "+R.label.toUpperCase(),cx+cardW/2,cy+cardH-34);
+    } else if(item.instantOpen){
+      // ── DROP INSTANT-OPEN CARD ──
+      const isChaosCard=item.isChaos||false;
+      // Animated glow bg
+      const pulse2=0.5+Math.sin(T*2.5+idx)*.5;
+      const glowGr=X.createRadialGradient(cx+cardW/2,cy+cardH*.4,4,cx+cardW/2,cy+cardH*.4,cardW*.6);
+      glowGr.addColorStop(0,ca(item.color,"33"));glowGr.addColorStop(1,"transparent");
+      X.fillStyle=glowGr;X.fillRect(cx,cy,cardW,cardH);
+      // Chaos spinning ring decoration
+      if(isChaosCard){
+        X.save();X.translate(cx+cardW/2,cy+cardH*.38);X.rotate(T*.8);
+        for(let ri=0;ri<6;ri++){const ra=ri/6*6.28;X.strokeStyle=ca(item.color,"44");X.lineWidth=1;X.beginPath();X.moveTo(Math.cos(ra)*22,Math.sin(ra)*22);X.lineTo(Math.cos(ra)*32,Math.sin(ra)*32);X.stroke();}
+        X.restore();
+      }
+      // Big icon
+      const iconPulse=1+Math.sin(T*3+idx)*.06;
+      X.save();X.translate(cx+cardW/2,cy+cardH*.36);X.scale(iconPulse,iconPulse);
+      gl(item.color,isChaosCard?18:12);
+      X.font='42px serif';X.textAlign="center";X.textBaseline="middle";X.fillText(item.icon,0,0);ng();
+      X.restore();
+      // Stock badge
+      const stock=isChaosCard?(SAVE.chaosDrops||0):(SAVE.starrDrops||0);
+      X.fillStyle="rgba(0,0,0,.6)";rr(cx+cardW/2-22,cy+cardH*.57,44,18,9);X.fill();
+      X.strokeStyle=ca(item.color,"88");X.lineWidth=1;rr(cx+cardW/2-22,cy+cardH*.57,44,18,9);X.stroke();
+      X.fillStyle="rgba(255,255,255,.75)";X.font=`bold 9px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText(`Bestand: ${stock}`,cx+cardW/2,cy+cardH*.57+9);
+      // Name
+      gl(item.color,6);X.fillStyle=item.color;X.font=`bold 13px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText(item.name.toUpperCase(),cx+cardW/2,cy+cardH*.74);ng();
+      X.fillStyle="rgba(200,190,255,.65)";X.font=`bold 9px "Lilita One"`;
+      X.fillText("SOFORT ÖFFNEN",cx+cardW/2,cy+cardH*.84);
     } else {
       // Resource card layout
       X.font="38px serif";X.textAlign="center";X.textBaseline="middle";
@@ -406,6 +444,22 @@ function drawShopScreen(){
       X.fillStyle="rgba(0,80,30,.8)";rr(cx+10,btnY,btnW,btnH,14);X.fill();
       X.fillStyle="#44FF88";X.font=`bold 11px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
       X.fillText("✓ BESITZ",cx+cardW/2,btnY+btnH/2);
+    } else if(item.instantOpen){
+      // Pulsierender Öffnen-Button
+      const pls=0.9+Math.sin(T*3+idx)*.1;
+      const isC=item.isChaos;
+      const btnGr2=X.createLinearGradient(cx+10,btnY,cx+10,btnY+btnH);
+      if(isC){btnGr2.addColorStop(0,"#FF6622");btnGr2.addColorStop(1,"#AA1100")}
+      else{btnGr2.addColorStop(0,"#FF66DD");btnGr2.addColorStop(1,"#AA0088")}
+      gl(isC?"#FF4400":"#FF44AA",12);
+      X.save();X.translate(cx+cardW/2,btnY+btnH/2);X.scale(pls,pls);
+      X.fillStyle=btnGr2;rr(-btnW/2,-btnH/2,btnW,btnH,14);X.fill();
+      X.strokeStyle=isC?"#FF8844":"#FF88EE";X.lineWidth=2;rr(-btnW/2,-btnH/2,btnW,btnH,14);X.stroke();ng();
+      X.fillStyle="rgba(255,255,255,.25)";rr(-btnW/2+1,-btnH/2+2,btnW-2,btnH*.4,12);X.fill();
+      const priceIcon="💎";
+      X.fillStyle="#FFF";X.font=`bold 12px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+      X.fillText(`${item.icon} ${priceIcon}${item.price}`,0,1);
+      X.restore();
     } else {
       const btnGr=X.createLinearGradient(cx+10,btnY,cx+10,btnY+btnH);
       btnGr.addColorStop(0,"#FFDD00");btnGr.addColorStop(1,"#FF8800");
@@ -472,10 +526,28 @@ function handleShopClick(x,y){
           if(!canAfford){snd("select");return}
           if(item.currency==="coins")SAVE.coins-=item.price;
           else SAVE.gems-=item.price;
+          // ── Sofort-öffnen Drops ──
+          if(item.reward==="open_starr"){
+            persist();
+            // Direkt 1 Starr Drop öffnen (ohne Zwischenlagerung)
+            SAVE.starrDrops=(SAVE.starrDrops||0)+1;
+            persist();
+            burst(x,y,"#FF44AA","#000",20,.9);snd("unlock");
+            setTimeout(()=>startStarrDropScreen("shop",false),300);
+            return;
+          } else if(item.reward==="open_chaos"){
+            persist();
+            SAVE.chaosDrops=(SAVE.chaosDrops||0)+1;
+            persist();
+            burst(x,y,"#FF6600","#000",24,1.1);snd("unlock");
+            setTimeout(()=>startStarrDropScreen("shop",true),300);
+            return;
+          }
           if(item.reward==="coins")SAVE.coins+=item.val;
           else if(item.reward==="gems")SAVE.gems+=item.val;
           else if(item.reward==="pp"){const k=BD[SEL]?.key||"SHELLY";SAVE.powerPoints[k]=(SAVE.powerPoints[k]||0)+item.val}
-          else if(item.reward==="drops")SAVE.starrDrops+=item.val;
+          else if(item.reward==="drops")SAVE.starrDrops=(SAVE.starrDrops||0)+item.val;
+          else if(item.reward==="chaosdrops")SAVE.chaosDrops=(SAVE.chaosDrops||0)+item.val;
           snd("coin");
           if(typeof COIN_TOASTS!=="undefined")COIN_TOASTS.push({x:c.x+c.w/2,y:c.y,amount:item.val,label:item.icon+" +"+item.val,life:2,maxL:2,vy:-50});
           burst(x,y,item.color||"#FFD700","#000",16,.8);
@@ -602,230 +674,370 @@ function claimBPReward(tier,isPremiumRow){
 }
 
 /* ═══ STARR DROPS ═══ */
+/* ═══ STARR DROPS — V10 FIXED + CHAOS DROPS ═══ */
 const STARR_DROP_POOL=[
   {type:'coins',value:100,weight:30},{type:'coins',value:250,weight:20},{type:'coins',value:500,weight:8},
   {type:'gems',value:5,weight:15},{type:'gems',value:15,weight:6},
   {type:'pp',value:20,weight:25},{type:'pp',value:50,weight:12},{type:'pp',value:100,weight:5},
   {type:'gadget',weight:4},{type:'starpower',weight:2},
 ];
-/* ═══ STARR DROP SYSTEM ═══ */
+
 const SD_RARITIES={
-  RARE:       {name:"Rare",       col:"#3AA0FF", glow:"#88CCFF", chance:0.55},
-  SUPER_RARE: {name:"Super Rare", col:"#3AFF7A", glow:"#88FFAA", chance:0.30},
-  EPIC:       {name:"Epic",       col:"#B94EFF", glow:"#DD99FF", chance:0.12},
-  MYTHIC:     {name:"Mythic",     col:"#FF4E4E", glow:"#FF9988", chance:0.025},
-  LEGENDARY:  {name:"Legendary",  col:"#FFD700", glow:"#FFFAAA", chance:0.005},
+  RARE:       {name:"Rare",       col:"#3AA0FF", glow:"#88CCFF", chance:0.55, isChaos:false},
+  SUPER_RARE: {name:"Super Rare", col:"#3AFF7A", glow:"#88FFAA", chance:0.30, isChaos:false},
+  EPIC:       {name:"Epic",       col:"#B94EFF", glow:"#DD99FF", chance:0.12, isChaos:false},
+  MYTHIC:     {name:"Mythic",     col:"#FF4E4E", glow:"#FF9988", chance:0.025, isChaos:false},
+  LEGENDARY:  {name:"Legendary",  col:"#FFD700", glow:"#FFFAAA", chance:0.005, isChaos:false},
+  // ── CHAOS DROPS: guaranteed higher rewards ──
+  CHAOS_RARE:      {name:"Chaos Rare",      col:"#FF6600", glow:"#FFAA44", chance:0.50, isChaos:true},
+  CHAOS_EPIC:      {name:"Chaos Epic",      col:"#FF00BB", glow:"#FF88DD", chance:0.35, isChaos:true},
+  CHAOS_LEGENDARY: {name:"Chaos Legendary", col:"#FF2222", glow:"#FF8888", chance:0.15, isChaos:true},
 };
 const SD_RARITY_ORDER=["RARE","SUPER_RARE","EPIC","MYTHIC","LEGENDARY"];
+const CD_RARITY_ORDER=["CHAOS_RARE","CHAOS_EPIC","CHAOS_LEGENDARY"];
 
-let SD_STATE=null; // null | {rarity, scale, rot, wobble, wobbleV, phase, particles, flashAlpha, reward, _from}
+let SD_STATE=null;
 
-function startStarrDropScreen(fromState){
-  if(SAVE.starrDrops<=0)return;
-  // Pick initial rarity
+// ── Deterministic reward tables per rarity ──
+function _sdRewardForRarity(rarKey, brawlerKey){
+  const key=brawlerKey||BD[SEL]?.key||'SHELLY';
   const r=Math.random();
-  let cum=0, rar="RARE";
-  for(const k of SD_RARITY_ORDER){cum+=SD_RARITIES[k].chance;if(r<cum){rar=k;break;}}
-  SD_STATE={rarity:rar,scale:0.01,rot:0,wobble:0,wobbleV:0,phase:"idle",particles:[],flashAlpha:0,reward:null,_from:fromState||"home",_popT:0};
-  SAVE.starrDrops--;persist();
+  switch(rarKey){
+    case'RARE':
+      if(r<0.45)return{type:'coins',value:150};
+      if(r<0.75)return{type:'pp',value:25};
+      if(r<0.92)return{type:'gems',value:5};
+      return{type:'coins',value:400};
+    case'SUPER_RARE':
+      if(r<0.40)return{type:'coins',value:350};
+      if(r<0.68)return{type:'pp',value:60};
+      if(r<0.85)return{type:'gems',value:12};
+      if(r<0.96)return{type:'coins',value:700};
+      return{type:'gadget'};
+    case'EPIC':
+      if(r<0.30)return{type:'pp',value:120};
+      if(r<0.55)return{type:'gems',value:22};
+      if(r<0.72)return{type:'coins',value:1200};
+      if(r<0.88)return{type:'gadget'};
+      return{type:'starpower'};
+    case'MYTHIC':
+      if(r<0.28)return{type:'gems',value:45};
+      if(r<0.52)return{type:'pp',value:300};
+      if(r<0.72)return{type:'starpower'};
+      if(r<0.88)return{type:'coins',value:2500};
+      return{type:'gadget'};
+    case'LEGENDARY':
+      if(r<0.35)return{type:'gems',value:80};
+      if(r<0.60)return{type:'pp',value:600};
+      if(r<0.80)return{type:'starpower'};
+      return{type:'coins',value:5000};
+    // ── CHAOS REWARDS (always better) ──
+    case'CHAOS_RARE':
+      if(r<0.40)return{type:'coins',value:800};
+      if(r<0.65)return{type:'pp',value:150};
+      if(r<0.82)return{type:'gems',value:20};
+      return{type:'gadget'};
+    case'CHAOS_EPIC':
+      if(r<0.30)return{type:'gems',value:60};
+      if(r<0.55)return{type:'pp',value:400};
+      if(r<0.72)return{type:'gadget'};
+      if(r<0.88)return{type:'starpower'};
+      return{type:'coins',value:3000};
+    case'CHAOS_LEGENDARY':
+      if(r<0.35)return{type:'gems',value:120};
+      if(r<0.60)return{type:'pp',value:800};
+      if(r<0.80)return{type:'starpower'};
+      return{type:'coins',value:8000};
+    default:
+      return{type:'coins',value:100};
+  }
+}
+
+function _applyReward(reward){
+  const key=BD[SEL]?.key||'SHELLY';
+  let label='';
+  if(reward.type==='coins'){SAVE.coins=(SAVE.coins||0)+reward.value;label=`🪙 +${reward.value} Münzen`}
+  else if(reward.type==='gems'){SAVE.gems=(SAVE.gems||0)+reward.value;label=`💎 +${reward.value} Gems`}
+  else if(reward.type==='pp'){
+    if(!SAVE.powerPoints)SAVE.powerPoints={};
+    SAVE.powerPoints[key]=(SAVE.powerPoints[key]||0)+reward.value;
+    label=`⚡ +${reward.value} Power-Punkte`
+  }
+  else if(reward.type==='gadget'){
+    if(!SAVE.gadgets)SAVE.gadgets={};
+    SAVE.gadgets[key]=true;
+    label=`🔧 ${GADGETS[key]?.nameDE||'Gadget'} freigeschaltet!`
+  }
+  else if(reward.type==='starpower'){
+    if(!SAVE.starPowers)SAVE.starPowers={};
+    SAVE.starPowers[key]=true;
+    label=`⭐ ${STAR_POWERS[key]?.nameDE||'Star Power'} freigeschaltet!`
+  }
+  reward.label=label;
+  return reward;
+}
+
+function startStarrDropScreen(fromState, forceChaos){
+  const isChaos=forceChaos||false;
+  if(isChaos){
+    if((SAVE.chaosDrops||0)<=0)return;
+    SAVE.chaosDrops--;
+  } else {
+    if((SAVE.starrDrops||0)<=0)return;
+    SAVE.starrDrops--;
+  }
+  persist();
+  const orderList=isChaos?CD_RARITY_ORDER:SD_RARITY_ORDER;
+  // Pick initial rarity from probability
+  const r=Math.random();
+  let cum=0,rar=orderList[0];
+  for(const k of orderList){if(SD_RARITIES[k]){cum+=SD_RARITIES[k].chance;if(r<cum){rar=k;break;}}}
+  SD_STATE={
+    rarity:rar, isChaos, scale:0.01, rot:0, wobble:0, wobbleV:4,
+    phase:"idle", particles:[], flashAlpha:0, reward:null,
+    _from:fromState||"home", _popT:0, _upgradeCount:0
+  };
   STATE="starrdrop";
 }
 
 function upgradeStarrDropRarity(){
-  const idx=SD_RARITY_ORDER.indexOf(SD_STATE.rarity);
-  if(idx<SD_RARITY_ORDER.length-1)SD_STATE.rarity=SD_RARITY_ORDER[idx+1];
+  const s=SD_STATE;if(!s)return;
+  const order=s.isChaos?CD_RARITY_ORDER:SD_RARITY_ORDER;
+  const idx=order.indexOf(s.rarity);
+  if(idx>=0&&idx<order.length-1){
+    s.rarity=order[idx+1];
+    s._upgradeCount=(s._upgradeCount||0)+1;
+  }
 }
 
 function openStarrDropReward(){
-  const key=BD[SEL]?.key||'SHELLY';
-  // Weighted reward pool based on rarity
-  const rarIdx=SD_RARITY_ORDER.indexOf(SD_STATE.rarity);
-  let reward;
-  const r2=Math.random();
-  if(rarIdx<=1){// Rare/Super Rare
-    if(r2<0.40)reward={type:'coins',value:100+rarIdx*150};
-    else if(r2<0.70)reward={type:'pp',value:20+rarIdx*30};
-    else if(r2<0.88)reward={type:'gems',value:5+rarIdx*5};
-    else if(r2<0.96)reward={type:'coins',value:500+rarIdx*250};
-    else reward={type:'gadget'};
-  } else if(rarIdx===2){// Epic
-    if(r2<0.35)reward={type:'pp',value:100};
-    else if(r2<0.60)reward={type:'gems',value:20};
-    else if(r2<0.80)reward={type:'coins',value:1000};
-    else if(r2<0.92)reward={type:'gadget'};
-    else reward={type:'starpower'};
-  } else {// Mythic / Legendary
-    if(r2<0.30)reward={type:'gems',value:30+rarIdx*10};
-    else if(r2<0.55)reward={type:'pp',value:200+rarIdx*100};
-    else if(r2<0.75)reward={type:'starpower'};
-    else reward={type:'coins',value:2000+rarIdx*1000};
-  }
-  // Apply reward
-  let label='';
-  if(reward.type==='coins'){SAVE.coins+=reward.value;label=`🪙 +${reward.value} Münzen`}
-  else if(reward.type==='gems'){SAVE.gems+=reward.value;label=`💎 +${reward.value} Gems`}
-  else if(reward.type==='pp'){SAVE.powerPoints[key]=(SAVE.powerPoints[key]||0)+reward.value;label=`⚡ +${reward.value} Power-Punkte`}
-  else if(reward.type==='gadget'){SAVE.gadgets[key]=true;label=`🔧 ${GADGETS[key]?.nameDE||'Gadget'} freigeschaltet!`}
-  else if(reward.type==='starpower'){SAVE.starPowers[key]=true;label=`⭐ ${STAR_POWERS[key]?.nameDE||'Star Power'} freigeschaltet!`}
-  reward.label=label;
-  SD_STATE.reward=reward;
-  persist();snd("unlock");
-  // Trigger particle explosion
-  const rar=SD_RARITIES[SD_STATE.rarity];
-  for(let i=0;i<60;i++){
-    const a2=Math.random()*6.28,spd=120+Math.random()*220;
-    const type=Math.random()<0.5?'coin':'gem';
-    SD_STATE.particles.push({x:W/2,y:H/2,vx:Math.cos(a2)*spd,vy:Math.sin(a2)*spd-80,life:1.2+Math.random()*.8,maxLife:2,rot:Math.random()*6.28,type,col:type==='coin'?'#FFD700':rar.col});
+  if(!SD_STATE)return;
+  const s=SD_STATE;
+  const reward=_sdRewardForRarity(s.rarity, BD[SEL]?.key||'SHELLY');
+  _applyReward(reward);
+  s.reward=reward;
+  persist();
+  snd("unlock");
+  // Particle burst
+  const rar=SD_RARITIES[s.rarity]||SD_RARITIES.RARE;
+  for(let i=0;i<70;i++){
+    const a2=Math.random()*6.28,spd=100+Math.random()*280;
+    const type=i%3===0?'coin':'gem';
+    s.particles.push({
+      x:W/2,y:H/2,
+      vx:Math.cos(a2)*spd,vy:Math.sin(a2)*spd-100,
+      life:1.0+Math.random()*1.0,rot:Math.random()*6.28,
+      type,col:type==='coin'?'#FFD700':rar.col
+    });
   }
 }
 
 function updateStarrDrop(){
   if(!SD_STATE)return;
   const s=SD_STATE;
-  // Pop-in
-  if(s.scale<1){s.scale=Math.min(1,s.scale+DT*4);if(s.scale>=1)s.scale=1;}
-  // Wobble physics
+  if(s.scale<1){s.scale=Math.min(1,s.scale+DT*5);if(s.scale>=1)s.scale=1;}
   s.wobbleV+=-s.wobble*18-s.wobbleV*5;s.wobble+=s.wobbleV*DT;
-  s.rot+=s.wobble*DT;
-  // Flash fade
-  if(s.flashAlpha>0)s.flashAlpha=Math.max(0,s.flashAlpha-DT*3);
-  // Particles
+  s.rot+=s.wobble*DT*0.5;
+  if(s.flashAlpha>0)s.flashAlpha=Math.max(0,s.flashAlpha-DT*4);
   for(let i=s.particles.length-1;i>=0;i--){
-    const p=s.particles[i];p.x+=p.vx*DT;p.y+=p.vy*DT;p.vy+=320*DT;p.life-=DT;p.rot+=DT*5;
+    const p=s.particles[i];
+    p.x+=p.vx*DT;p.y+=p.vy*DT;p.vy+=300*DT;p.life-=DT;p.rot+=DT*6;
     if(p.life<=0)s.particles.splice(i,1);
   }
-  // Pop-out after reward shown
-  if(s.phase==="done"){s._popT=(s._popT||0)+DT;if(s._popT>1.8){STATE=s._from;SD_STATE=null;}}
+  if(s.phase==="done"){
+    s._popT=(s._popT||0)+DT;
+    if(s._popT>2.2){STATE=s._from||"home";SD_STATE=null;}
+  }
 }
 
 function drawStarrDrop(rarity,scale,rotation){
   const rar=SD_RARITIES[rarity]||SD_RARITIES.RARE;
-  X.save();
-  X.translate(W/2,H/2);
-  X.rotate(rotation);
+  const isChaos=rar.isChaos;
+  X.save();X.translate(W/2,H/2);X.rotate(rotation);
   const wobble=SD_STATE?.wobble||0;
-  const sx=scale*(1+wobble*0.15), sy=scale*(1-wobble*0.1);
-  X.scale(sx,sy);
-  // Outer glow
-  const gGr=X.createRadialGradient(0,0,10,0,0,80);
-  gGr.addColorStop(0,rar.col+'AA');gGr.addColorStop(1,'transparent');
-  X.fillStyle=gGr;X.beginPath();X.arc(0,0,80,0,6.28);X.fill();
+  X.scale(scale*(1+wobble*0.15), scale*(1-wobble*0.1));
+  // Outer pulse glow
+  const pulseR=88+Math.sin((SD_STATE?T:0)*4)*6;
+  const gGr=X.createRadialGradient(0,0,12,0,0,pulseR);
+  gGr.addColorStop(0,rar.col+'CC');gGr.addColorStop(.6,rar.col+'33');gGr.addColorStop(1,'transparent');
+  X.fillStyle=gGr;X.beginPath();X.arc(0,0,pulseR,0,6.28);X.fill();
+  // Chaos ring spinning lines
+  if(isChaos){
+    X.save();X.rotate((SD_STATE?T:0)*1.5);
+    for(let i=0;i<8;i++){
+      const a=i/8*6.28;
+      X.strokeStyle=rar.col;X.lineWidth=2;X.globalAlpha=0.4+Math.sin(i)*0.2;
+      X.beginPath();X.moveTo(Math.cos(a)*52,Math.sin(a)*52);X.lineTo(Math.cos(a)*78,Math.sin(a)*78);X.stroke();
+    }
+    X.globalAlpha=1;X.restore();
+  }
   // Box body
   const bw=90,bh=96,br=18;
   const boxGr=X.createLinearGradient(-bw/2,-bh/2,-bw/2,bh/2);
-  boxGr.addColorStop(0,rar.col);boxGr.addColorStop(0.5,rar.glow);boxGr.addColorStop(1,rar.col);
-  X.fillStyle=boxGr;rr(-bw/2,-bh/2,bw,bh,br);X.fill();
+  if(isChaos){
+    boxGr.addColorStop(0,'#220000');boxGr.addColorStop(0.5,rar.col+'88');boxGr.addColorStop(1,'#110000');
+  }else{
+    boxGr.addColorStop(0,rar.col);boxGr.addColorStop(0.5,rar.glow);boxGr.addColorStop(1,rar.col);
+  }
+  gl(rar.col,isChaos?28:16);
+  X.fillStyle=boxGr;rr(-bw/2,-bh/2,bw,bh,br);X.fill();ng();
   // Shine
-  X.fillStyle='rgba(255,255,255,0.22)';rr(-bw/2+6,-bh/2+6,bw-12,bh*.38,br-4);X.fill();
-  // Border
-  X.strokeStyle='rgba(255,255,255,0.55)';X.lineWidth=3;rr(-bw/2,-bh/2,bw,bh,br);X.stroke();
-  // Star icon
-  X.font='44px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('⭐',0,-4);
-  // Rarity label on box
-  X.strokeStyle='rgba(0,0,0,0.7)';X.lineWidth=4;X.font=`bold 11px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
-  X.strokeText(rar.name.toUpperCase(),0,bh/2-14);
-  X.fillStyle='#FFF';X.fillText(rar.name.toUpperCase(),0,bh/2-14);
+  X.fillStyle='rgba(255,255,255,0.2)';rr(-bw/2+6,-bh/2+6,bw-12,bh*.38,br-4);X.fill();
+  // Border — double for chaos
+  X.strokeStyle=isChaos?'rgba(255,100,0,0.9)':'rgba(255,255,255,0.6)';X.lineWidth=isChaos?4:3;
+  rr(-bw/2,-bh/2,bw,bh,br);X.stroke();
+  if(isChaos){
+    X.strokeStyle='rgba(255,255,255,0.3)';X.lineWidth=1.5;
+    rr(-bw/2+4,-bh/2+4,bw-8,bh-8,br-4);X.stroke();
+  }
+  // Icon
+  X.font='44px serif';X.textAlign='center';X.textBaseline='middle';
+  X.fillText(isChaos?'🌀':'⭐',0,-4);
+  // Rarity label
+  X.strokeStyle='rgba(0,0,0,0.8)';X.lineWidth=4;X.font=`bold 10px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+  X.strokeText(rar.name.toUpperCase(),0,bh/2-13);
+  X.fillStyle=isChaos?'#FF8844':'#FFF';X.fillText(rar.name.toUpperCase(),0,bh/2-13);
   X.restore();
 }
 
 function drawStarrDropScreen(){
   if(!SD_STATE)return;
   const s=SD_STATE;
-  const rar=SD_RARITIES[s.rarity];
+  const rar=SD_RARITIES[s.rarity]||SD_RARITIES.RARE;
+  const isChaos=s.isChaos;
   // BG
-  const bg=X.createRadialGradient(W/2,H/2,60,W/2,H/2,500);
-  bg.addColorStop(0,'#1A1040');bg.addColorStop(1,'#060310');
+  const bg=X.createRadialGradient(W/2,H/2,60,W/2,H/2,520);
+  if(isChaos){
+    bg.addColorStop(0,'#2A0800');bg.addColorStop(.5,'#180400');bg.addColorStop(1,'#060100');
+  }else{
+    bg.addColorStop(0,'#1A1040');bg.addColorStop(1,'#060310');
+  }
   X.fillStyle=bg;X.fillRect(0,0,W,H);
   // Animated ring rays
   X.save();X.translate(W/2,H/2);
-  for(let i=0;i<16;i++){
-    const a2=i/16*6.28+T*.3;
-    X.globalAlpha=0.06+Math.sin(T*2+i)*.03;
-    X.strokeStyle=rar.col;X.lineWidth=2;
-    X.beginPath();X.moveTo(0,0);X.lineTo(Math.cos(a2)*520,Math.sin(a2)*520);X.stroke();
+  const rayCount=isChaos?24:16;
+  for(let i=0;i<rayCount;i++){
+    const a2=i/rayCount*6.28+(isChaos?T*.5:T*.3);
+    X.globalAlpha=0.05+Math.sin(T*2+i)*.03;
+    X.strokeStyle=rar.col;X.lineWidth=isChaos?1.5:2;
+    X.beginPath();X.moveTo(0,0);X.lineTo(Math.cos(a2)*540,Math.sin(a2)*540);X.stroke();
   }
   X.globalAlpha=1;X.restore();
+  // CHAOS: extra pulsing rings
+  if(isChaos){
+    for(let r2=1;r2<=3;r2++){
+      const rr2=120*r2+Math.sin(T*3+r2)*15;
+      X.strokeStyle=rar.col;X.lineWidth=1;X.globalAlpha=0.12-r2*.03;
+      X.beginPath();X.arc(W/2,H/2,rr2,0,6.28);X.stroke();
+    }
+    X.globalAlpha=1;
+  }
   // Particles
   for(const p of s.particles){
-    const alpha=Math.min(1,p.life/0.4);
+    const alpha=Math.max(0,Math.min(1,p.life/0.5));
     X.save();X.globalAlpha=alpha;X.translate(p.x,p.y);X.rotate(p.rot);
-    if(p.type==='coin'){X.fillStyle='#FFD700';X.beginPath();X.arc(0,0,7,0,6.28);X.fill();X.fillStyle='#AA8800';X.font='bold 8px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('$',0,0);}
-    else{X.fillStyle=p.col;X.beginPath();for(let i2=0;i2<6;i2++){const aa=i2/6*6.28;X.lineTo(Math.cos(aa)*8,Math.sin(aa)*8);}X.closePath();X.fill();}
+    if(p.type==='coin'){
+      X.fillStyle='#FFD700';X.beginPath();X.arc(0,0,7,0,6.28);X.fill();
+      X.fillStyle='rgba(0,0,0,0.3)';X.font='bold 8px serif';X.textAlign='center';X.textBaseline='middle';X.fillText('$',0,0);
+    }else{
+      X.fillStyle=p.col;X.beginPath();
+      for(let i2=0;i2<6;i2++){const aa=i2/6*6.28;X.lineTo(Math.cos(aa)*8,Math.sin(aa)*8);}
+      X.closePath();X.fill();
+    }
     X.restore();
   }
   // Drop box
   drawStarrDrop(s.rarity,s.scale,s.rot);
-  // Tap hint or reward text
+  // ── Type label top ──
+  const topLabel=isChaos?'⚡ CHAOS DROP':'✨ STARR DROP';
+  X.strokeStyle='rgba(0,0,0,0.9)';X.lineWidth=6;X.font=`bold 18px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+  X.strokeText(topLabel,W/2,38);
+  gl(rar.col,10);X.fillStyle=rar.col;X.fillText(topLabel,W/2,38);ng();
+  // Upgrade count badge
+  if((s._upgradeCount||0)>0){
+    X.fillStyle='rgba(0,0,0,0.6)';rr(W/2-55,50,110,22,11);X.fill();
+    X.strokeStyle=rar.col;X.lineWidth=1;rr(W/2-55,50,110,22,11);X.stroke();
+    gl(rar.col,4);X.fillStyle=rar.col;X.font=`bold 9px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+    X.fillText(`🔼 ${s._upgradeCount}× UPGRADE!`,W/2,61);ng();
+  }
+  // ── TAP HINT (only when idle & fully visible) ──
   if(s.phase==="idle"&&s.scale>=0.98){
-    const pulse=0.75+Math.sin(T*3)*.25;
+    const pulse=0.7+Math.sin(T*3)*.3;
     X.globalAlpha=pulse;
-    X.strokeStyle='rgba(0,0,0,0.8)';X.lineWidth=5;X.font=`bold 18px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
-    X.strokeText('Tippe um zu öffnen!',W/2,H/2+100);
-    X.fillStyle='#FFFFFF';X.fillText('Tippe um zu öffnen!',W/2,H/2+100);
+    const hintCol=isChaos?'#FF8844':'#FFFFFF';
+    X.strokeStyle='rgba(0,0,0,0.85)';X.lineWidth=6;X.font=`bold 19px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+    X.strokeText('Tippe zum Öffnen!',W/2,H/2+108);
+    gl(hintCol,8);X.fillStyle=hintCol;X.fillText('Tippe zum Öffnen!',W/2,H/2+108);ng();
     X.globalAlpha=1;
-    // Drop count badge
-    const dc=SAVE.starrDrops||0;
-    if(dc>0){
-      X.fillStyle='rgba(0,0,0,0.5)';rr(W/2-40,H/2+122,80,24,12);X.fill();
-      X.strokeStyle='rgba(255,255,255,0.3)';X.lineWidth=1;rr(W/2-40,H/2+122,80,24,12);X.stroke();
-      X.fillStyle='rgba(255,255,255,0.7)';X.font=`bold 11px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
-      X.fillText(`📦 Noch ${dc} übrig`,W/2,H/2+134);
+    // Stock counter
+    const stockCount=isChaos?(SAVE.chaosDrops||0):(SAVE.starrDrops||0);
+    const stockIcon=isChaos?'⚡':'📦';
+    if(stockCount>0){
+      X.fillStyle='rgba(0,0,0,0.55)';rr(W/2-50,H/2+128,100,26,13);X.fill();
+      X.strokeStyle=ca(rar.col,"55");X.lineWidth=1;rr(W/2-50,H/2+128,100,26,13);X.stroke();
+      X.fillStyle='rgba(255,255,255,0.75)';X.font=`bold 11px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+      X.fillText(`${stockIcon} Noch ${stockCount}`,W/2,H/2+141);
     }
   }
+  // ── REWARD PANEL (done phase) ──
   if(s.phase==="done"&&s.reward){
-    const alpha=Math.min(1,(s._popT||0)/0.3);
-    X.globalAlpha=alpha;
-    // Reward banner
-    const bw=360,bh=70,bx=W/2-bw/2,by=H/2+112;
-    const rewGr=X.createLinearGradient(bx,by,bx+bw,by);
-    rewGr.addColorStop(0,rar.col+'44');rewGr.addColorStop(0.5,rar.col+'88');rewGr.addColorStop(1,rar.col+'44');
-    X.fillStyle=rewGr;rr(bx,by,bw,bh,18);X.fill();
-    X.strokeStyle=rar.col;X.lineWidth=2;rr(bx,by,bw,bh,18);X.stroke();
-    X.strokeStyle='rgba(0,0,0,0.9)';X.lineWidth=5;X.font=`bold 22px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
-    X.strokeText(s.reward.label,W/2,by+bh/2-8);
-    X.fillStyle=rar.col;X.fillText(s.reward.label,W/2,by+bh/2-8);
-    X.strokeStyle='rgba(0,0,0,0.6)';X.lineWidth=3;X.font=`bold 12px "Lilita One"`;
-    X.strokeText('Tippe zum Schließen',W/2,by+bh/2+16);
-    X.fillStyle='rgba(255,255,255,0.6)';X.fillText('Tippe zum Schließen',W/2,by+bh/2+16);
+    const fadeIn=Math.min(1,(s._popT||0)/0.35);
+    X.globalAlpha=fadeIn;
+    const bw2=400,bh2=80,bx2=W/2-bw2/2,by2=H/2+100;
+    // Panel bg
+    const rewGr=X.createLinearGradient(bx2,by2,bx2+bw2,by2);
+    rewGr.addColorStop(0,'rgba(0,0,0,0)');rewGr.addColorStop(.3,rar.col+'55');
+    rewGr.addColorStop(.7,rar.col+'55');rewGr.addColorStop(1,'rgba(0,0,0,0)');
+    X.fillStyle=rewGr;rr(bx2,by2,bw2,bh2,20);X.fill();
+    gl(rar.col,14);X.strokeStyle=rar.col;X.lineWidth=2.5;rr(bx2,by2,bw2,bh2,20);X.stroke();ng();
+    // Reward label
+    X.strokeStyle='rgba(0,0,0,0.95)';X.lineWidth=6;X.font=`bold 24px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
+    X.strokeText(s.reward.label||'',W/2,by2+bh2/2-10);
+    gl(rar.col,12);X.fillStyle=rar.col;X.fillText(s.reward.label||'',W/2,by2+bh2/2-10);ng();
+    // Sub-label
+    X.strokeStyle='rgba(0,0,0,0.7)';X.lineWidth=3;X.font=`bold 13px "Lilita One"`;
+    X.strokeText('Tippe zum Schließen',W/2,by2+bh2/2+18);
+    X.fillStyle='rgba(255,255,255,0.65)';X.fillText('Tippe zum Schließen',W/2,by2+bh2/2+18);
     X.globalAlpha=1;
   }
-  // Full-screen flash on upgrade
+  // Full-screen flash on upgrade/open
   if(s.flashAlpha>0){
-    X.globalAlpha=s.flashAlpha;X.fillStyle='#FFFFFF';X.fillRect(0,0,W,H);X.globalAlpha=1;
+    X.globalAlpha=s.flashAlpha*0.85;
+    const flashCol=isChaos?'rgba(255,80,0,1)':'rgba(255,255,255,1)';
+    X.fillStyle=flashCol;X.fillRect(0,0,W,H);
+    X.globalAlpha=1;
   }
-  // Rarity label top
-  X.strokeStyle='rgba(0,0,0,0.8)';X.lineWidth=5;X.font=`bold 16px "Lilita One"`;X.textAlign='center';X.textBaseline='middle';
-  X.strokeText('STARR DROP',W/2,44);
-  gl(rar.col,8);X.fillStyle=rar.col;X.fillText('STARR DROP',W/2,44);ng();
 }
 
 function handleStarrDropClick(){
   if(!SD_STATE)return;
   const s=SD_STATE;
-  if(s.scale<0.95)return;
-  if(s.phase==="done"){STATE=s._from;SD_STATE=null;return;}
-  if(s.phase==="idle"){
-    // Chance to upgrade rarity
-    const curIdx=SD_RARITY_ORDER.indexOf(s.rarity);
-    const upgradeRoll=Math.random();
-    let upgraded=false;
-    if(curIdx<SD_RARITY_ORDER.length-1){
-      const upgradeChance=[0.35,0.25,0.15,0.08][curIdx]||0;
-      if(upgradeRoll<upgradeChance){
-        upgradeStarrDropRarity();
-        s.flashAlpha=1;s.wobbleV=12;upgraded=true;snd("unlock");
-        return; // let player tap again on upgraded rarity
-      }
-    }
-    // Open!
-    s.wobbleV=18;s.phase="opening";
-    setTimeout(()=>{
-      if(!SD_STATE)return;
-      openStarrDropReward();
-      SD_STATE.phase="done";SD_STATE._popT=0;
-    },400);
+  if(s.scale<0.92)return;
+  // Close on done
+  if(s.phase==="done"){STATE=s._from||"home";SD_STATE=null;return;}
+  // Only handle idle taps
+  if(s.phase!=="idle")return;
+  const order=s.isChaos?CD_RARITY_ORDER:SD_RARITY_ORDER;
+  const curIdx=order.indexOf(s.rarity);
+  // Upgrade chance (diminishes each time)
+  const baseChances=s.isChaos?[0.30,0.18]:[0.38,0.26,0.14,0.07];
+  const upgradeChance=(baseChances[curIdx]||0)*Math.pow(0.6,s._upgradeCount||0);
+  if(curIdx<order.length-1&&Math.random()<upgradeChance){
+    upgradeStarrDropRarity();
+    s.flashAlpha=1;s.wobbleV=16;snd("unlock");
+    return;
   }
+  // Open the drop
+  s.phase="opening";
+  s.wobbleV=22;
+  openStarrDropReward();
+  setTimeout(()=>{
+    if(!SD_STATE)return;
+    SD_STATE.phase="done";SD_STATE._popT=0;
+    SHK=0.3;
+  },350);
 }
+
 /* ═══ TROPHY SYSTEM ═══ */
 // Gain/loss tables per brawler-trophy bracket
 // [minTrophies, gain, loss]
@@ -1026,6 +1238,8 @@ const BRAWLER_CLASS={
   COLETTE: "damage_dealer", // offiziell: Damage Dealer
   EDGAR:   "assassin",      // offiziell: Assassin
   LOLA:    "damage_dealer", // offiziell: Damage Dealer
+  STU:     "assassin",      // V10: Dash-Assassin
+  BUZZ:    "tank",          // V10: Stun-Tank
 };
 
 function getBrawlerClass(bd){
@@ -1400,17 +1614,9 @@ function updateShowdown(){
     }
     // Normal Power Cube pickup
     else if(!p.isEnergyDrink&&dst(p,PL)<PL.r+18){
-      p.collected=true;
-      // FIX #6: Power Cubes give +10% HP & Damage (multiplicative)
-      const oldMaxHp = PL.maxHp;
-      PL.maxHp = Math.round(PL.maxHp * 1.10); // +10% max HP
-      PL.hp = Math.min(PL.maxHp, PL.hp + (PL.maxHp - oldMaxHp)); // Heal by the increase
-      PL._powerCubes = (PL._powerCubes || 0) + 1; // Track for damage boost
-      
-      const hpGain = PL.maxHp - oldMaxHp;
-      spawnDmg(p.x,p.y-20,`+${hpGain} HP`,"#FFD700",1.3);
-      burst(p.x,p.y,"#FFD700","#FF8800",12,.6);snd("gem");
-      // earnCoins disabled in FIX #3
+      p.collected=true;PL.maxHp+=p.val;PL.hp=Math.min(PL.maxHp,PL.hp+p.val);
+      spawnDmg(p.x,p.y-20,"+"+p.val+" HP","#FFD700",1.3);
+      burst(p.x,p.y,"#FFD700","#FF8800",12,.6);snd("gem");earnCoins(5,p.x,p.y-18,"+5");
     }
     
     for(const e of ENM){
@@ -1420,13 +1626,8 @@ function updateShowdown(){
         e.spdBoost=p.duration;
         e._energyDrinkDmg=p.duration;
       }else{
-        p.collected=true;
-        // FIX #6: Power Cubes +10% for enemies too
-        const oldMax = e.maxHp || e.hp;
-        e.maxHp = Math.round(oldMax * 1.10);
-        e.hp = Math.min(e.maxHp, e.hp + (e.maxHp - oldMax));
-        e.powerups = (e.powerups || 0) + 1;
-        e._powerCubes = (e._powerCubes || 0) + 1;
+        p.collected=true;e.maxHp=(e.maxHp||e.hp)+p.val;
+        e.hp=Math.min(e.maxHp,e.hp+p.val);e.powerups=(e.powerups||0)+1;
       }
     }
   }
@@ -1753,7 +1954,7 @@ function drawMap(T){
   }
 }
 
-/* ═══ BRAWLER DEFS  (24 brawlers) ═══ */
+/* ═══ BRAWLER DEFS  (26 brawlers) — V10: STU & BUZZ hinzugefügt ═══ */
 const BD=[
   {key:"SHELLY", name:"Shelly",   rarity:"COMMON",    color:"#FF7755",dark:"#CC3322",body:"#EE5533", hp:5600,spd:200,ammoMax:3,ammoR:1.4,sCool:.68,wType:"shotgun", dmg:660, rLife:1.5, desc:"Balanced shotgun blasts",         sHp:3,sSp:3,sDm:3,sRg:2, superDesc:"Wide shotgun cone"},
   {key:"COLT",   name:"Colt",     rarity:"RARE",      color:"#88BBFF",dark:"#2244AA",body:"#4477DD", hp:3400,spd:205,ammoMax:6,ammoR:1.0,sCool:.22,wType:"rifle",   dmg:340, rLife:1.9, desc:"Rapid-fire precision shots",        sHp:2,sSp:3,sDm:3,sRg:4, superDesc:"16-bullet burst"},
@@ -1784,8 +1985,11 @@ const BD=[
   {key:"JACKY",  name:"Jacky",    rarity:"SUPER_RARE",     color:"#FF8844",dark:"#AA4400",body:"#EE6622", hp:6400,spd:190,ammoMax:1,ammoR:2.2,sCool:.80,wType:"hammer",  dmg:1800,rLife:1.0, desc:"Jackhammer attacks nearby enemies",    sHp:4,sSp:2,sDm:5,sRg:1, superDesc:"Ground stomp shockwave"},
   {key:"NITA",   name:"Nita",     rarity:"RARE",           color:"#8844FF",dark:"#4400BB",body:"#6622EE", hp:3800,spd:200,ammoMax:3,ammoR:1.4,sCool:.65,wType:"rifle",   dmg:680, rLife:1.6, desc:"Shockwave and bear companion",         sHp:2,sSp:3,sDm:3,sRg:3, superDesc:"Summon Bruce the bear"},
   {key:"COLETTE",name:"Colette",  rarity:"EPIC",           color:"#FF4488",dark:"#AA0044",body:"#EE2266", hp:3600,spd:200,ammoMax:3,ammoR:1.3,sCool:.60,wType:"rifle",   dmg:560, rLife:1.8, desc:"Attacks deal % of enemy max HP",       sHp:2,sSp:3,sDm:3,sRg:3, superDesc:"% HP damage super charge"},
-  {key:"EDGAR",  name:"Edgar",    rarity:"SUPER_RARE",     color:"#8888FF",dark:"#2222AA",body:"#6666EE", hp:3800,spd:225,ammoMax:3,ammoR:1.2,sCool:.50,wType:"blades",  dmg:800, rLife:0.9, desc:"Heals on each hit, super always ready",sHp:2,sSp:4,sDm:4,sRg:1, superDesc:"Leap and lifesteal dash"},
+  {key:"EDGAR",  name:"Edgar",    rarity:"LEGENDARY",      color:"#8888FF",dark:"#2222AA",body:"#6666EE", hp:3800,spd:225,ammoMax:3,ammoR:1.2,sCool:.50,wType:"blades",  dmg:800, rLife:0.9, desc:"Heals on each hit, super always ready",sHp:2,sSp:4,sDm:4,sRg:1, superDesc:"Leap and lifesteal dash"},
   {key:"LOLA",   name:"Lola",     rarity:"EPIC",           color:"#FF66CC",dark:"#AA2288",body:"#EE44AA", hp:3600,spd:210,ammoMax:3,ammoR:1.3,sCool:.60,wType:"rifle",   dmg:620, rLife:1.8, desc:"Ego clone mirrors her attacks",        sHp:2,sSp:3,sDm:3,sRg:3, superDesc:"Deploy Ego mirror clone"},
+  // ── V10 NEW ──
+  {key:"STU",    name:"Stu",      rarity:"MYTHIC",         color:"#FF8833",dark:"#CC4400",body:"#EE6611", hp:4000,spd:245,ammoMax:2,ammoR:1.0,sCool:.55,wType:"rocket",  dmg:900, rLife:1.8, desc:"Drifting racer with dodge mechanics",  sHp:2,sSp:5,sDm:3,sRg:3, superDesc:"Dash + flames trail"},
+  {key:"BUZZ",   name:"Buzz",     rarity:"EPIC",           color:"#00CCFF",dark:"#0066AA",body:"#0099DD", hp:6000,spd:195,ammoMax:3,ammoR:1.6,sCool:.80,wType:"hammer",  dmg:1000,rLife:1.1, desc:"Stuns enemies with sonar rings",        sHp:4,sSp:3,sDm:4,sRg:2, superDesc:"Hyper stun lunge leap"},
 ];
 // Sort by rarity: COMMON → RARE → SUPER_RARE → EPIC → MYTHIC → LEGENDARY
 const _RARITY_RANK={COMMON:0,RARE:1,SUPER_RARE:2,EPIC:3,MYTHIC:4,LEGENDARY:5};
@@ -2118,6 +2322,10 @@ const MODES=[
    desc:"Score 2 goals to win! Kick the ball into the enemy goal.",
    descDE:"Erziele 2 Tore! Schieß den Ball ins Tor.",
    color:"#4488FF",dark:"#112288"},
+  {key:"wipeout",   icon:"💥",label:"Wipeout",      labelDE:"Wipeout",
+   desc:"Most eliminations in 2 minutes wins! Respawns active.",
+   descDE:"Meiste Abschüsse in 2 Minuten gewinnt! Respawns aktiv.",
+   color:"#FF3300",dark:"#991100"},
 ];
 let MODE_SEL=0;
 
@@ -2777,11 +2985,9 @@ const WAVES=[
 ];
 
 function earnCoins(amount,x,y,label){
-  // FIX #3: NO coin rewards during gameplay! Coins only from Brawl Pass/Mastery
-  // SAVE.coins+=amount;SESSION_COINS+=amount;persist();
-  // Still show visual feedback but don't actually give coins
-  if(x!==undefined)COIN_TOASTS.push({x,y,amount:0,label:"",life:1.4,maxL:1.4,vy:-55});
-  // snd("coin"); // No coin sound either
+  SAVE.coins+=amount;SESSION_COINS+=amount;persist();
+  if(x!==undefined)COIN_TOASTS.push({x,y,amount,label,life:1.4,maxL:1.4,vy:-55});
+  snd("coin");
 }
 
 function init(){
@@ -2954,8 +3160,7 @@ function init(){
     initBrawlBall();
   } else {ENM=WAVES[0].map(fn=>fn());}
   BUL=[];GEM=[];PAR=[];DNUM=[];KFEED=[];spawnBushes();
-  // FIX #1: NO initial gems! Only Gem Mine spawns them in Gem Grab
-  // (Gems only spawn from enemies in other modes)
+  for(const[col,row]of GEM_SPOTS)GEM.push({x:col*TS+TS/2,y:row*TS+TS/2,collected:false,bob:Math.random()*6.28,sc:0});
   annWave(1);snd("wave");
 }
 function annWave(n){WANNOUNCE=3;WTEXT=t("waveAnn",n,WAVES.length)}
@@ -2977,9 +3182,7 @@ function fireWeapon(){
   // CRITICAL FIX: Apply Power Level multiplier to damage
   const baseDmg=PL.dmg;
   const plMultiplier=getBrawlerMultiplier(bdKey);
-  // FIX #6: Apply Power Cube damage boost (+10% per cube)
-  const powerCubeMultiplier = Math.pow(1.10, PL._powerCubes || 0);
-  const dmg=Math.round(baseDmg*plMultiplier*powerCubeMultiplier);
+  const dmg=Math.round(baseDmg*plMultiplier);
   const fb=(ang,sp,dm,r2=6,sc2=1.4,ign=false)=>fireBul(PL.x,PL.y,ang,sp,dm,color,dark,"player",r2,sc2,rLife,ign);
   switch(wType){
     case"shotgun":fb(a,460,dmg,6,1.4);fb(a+.22,440,dmg*.75,5,1.2);fb(a-.22,440,dmg*.75,5,1.2);break;
@@ -3010,31 +3213,11 @@ function fireSuper(){
   // CRITICAL FIX: Apply Power Level multiplier to Super damage
   const baseDmg=PL.dmg;
   const plMultiplier=getBrawlerMultiplier(bdKey);
-  // FIX #6: Apply Power Cube damage boost (+10% per cube)
-  const powerCubeMultiplier = Math.pow(1.10, PL._powerCubes || 0);
-  const dmg=Math.round(baseDmg*plMultiplier*powerCubeMultiplier);
-  
-  // FIX #4: CORRECT HYPERCHARGE MECHANIC (April 2026)
-  // Hypercharge charges by using Super (33% per use = 3 Supers needed)
-  // NOT random! Only if Power Level 11 and has Hypercharge unlocked
-  if(!PL.hyperchargeMeter) PL.hyperchargeMeter = 0;
-  
-  const hasHypercharge = getPowerLevel(bdKey) >= 11 && SAVE.hypercharges[bdKey];
-  if(hasHypercharge && !PL._hyperActive) {
-    PL.hyperchargeMeter += 33; // +33% per Super use
-    
-    if(PL.hyperchargeMeter >= 100) {
-      // Hypercharge ready!
-      PL.hyperchargeMeter = 0;
-      PL._hyperActive = true;
-      PL._hyperT = 4; // 4 second duration
-      spawnDmg(PL.x,PL.y-55,"⚡ HYPERCHARGE!","#FFD700",1.6);
-      SHK=.4;
-      burst(PL.x,PL.y,"#FFD700","#FF8800",30,1.2);
-    }
-  }
-  
-  const hyperMult=PL._hyperActive?1.4:1; // +40% damage when active
+  const dmg=Math.round(baseDmg*plMultiplier);
+  // ── HYPERCHARGE: activates if PL9+ and random 15% chance on super fire ──
+  const hyperAvail=getPowerLevel(bdKey)>=9&&!PL._hyperActive&&Math.random()<0.15;
+  if(hyperAvail){PL._hyperActive=true;PL._hyperT=4;spawnDmg(PL.x,PL.y-55,"⚡ HYPERCHARGE!","#FFD700",1.6);SHK=.4;burst(PL.x,PL.y,"#FFD700","#FF8800",30,1.2)}
+  const hyperMult=PL._hyperActive?1.4:1;
   snd("super");PL.sup=0;PL.supCD=5;
   if(bdKey==="SHELLY"){for(let i=0;i<14;i++)fireBul(PL.x,PL.y,a+(i/13-.5)*.88,440*hyperMult,dmg*1.5*hyperMult,color,dark,"player",7,1.5,1.5);SHK=.35}
   else if(bdKey==="COLT"){for(let i=0;i<16;i++){const ai=a+(i%2?.06:-.06);setTimeout(()=>fireBul(PL.x,PL.y,ai,540*hyperMult,dmg*hyperMult,color,dark,"player",4,1.1,1.9),i*60)}}
@@ -3331,17 +3514,8 @@ function updateEnemies(){
       for(let _i=0;_i<(e.gems||0);_i++){const _a=Math.random()*6.28,_r=15+Math.random()*30;GEM.push({x:e.x+Math.cos(_a)*_r,y:e.y+Math.sin(_a)*_r,collected:false,bob:Math.random()*6.28,sc:0,team:-1});}
       if(MODE==="gems"&&e.gems>0){if(e.team===1)GG_GEMS_RED=Math.max(0,GG_GEMS_RED-e.gems);else GG_GEMS_BLUE=Math.max(0,GG_GEMS_BLUE-e.gems);e.gems=0;}
       if(MODE==="knockout"){if(e.team===1)KO_ALIVE_RED--;else if(e.team===0)KO_ALIVE_BLUE--;}
-      
-      // FIX #2: Respawn mechanics - Knockout NO respawns! Other 3v3 modes 3s respawn
-      if(MODE==="knockout"){
-        // KNOCKOUT: NO RESPAWNS! Dead is dead for the round
-        // (handled by KO_ALIVE counters above)
-      }
-      else if(["gems","bounty","hotzone","heist","brawlball"].includes(MODE)){
-        // All other 3v3 modes: 3 second respawn for allies
-        if(e.team===0&&e.friendly){e._respawnT=3;}
-      }
-      
+      if(MODE==="gems"&&e.team===0&&e.friendly){e._respawnT=3;}
+      if(MODE==="bounty"&&e.team===0&&e.friendly){e._respawnT=3;} // Bounty respawns allies
       if(MODE==="showdown"){SD_ALIVE--;const drops=(e.powerups||0)+1+Math.floor(Math.random()*2);for(let _i=0;_i<drops;_i++){const _a=Math.random()*6.28,_r=20+Math.random()*35;SD_POWERUPS.push({x:e.x+Math.cos(_a)*_r,y:e.y+Math.sin(_a)*_r,sc:0,bob:Math.random()*6.28,val:100+Math.floor(Math.random()*150),collected:false});}}
       burst(e.x,e.y,e.color,e.dark,26,1.15);snd("death");
       KFEED.unshift({name:e.name,t:3.5,color:e.color});if(KFEED.length>4)KFEED.pop();
@@ -3350,22 +3524,12 @@ function updateEnemies(){
       for(let i=0;i<n;i++){const a2=Math.random()*6.28,r2=20+Math.random()*45;GEM.push({x:e.x+Math.cos(a2)*r2,y:e.y+Math.sin(a2)*r2,collected:false,bob:Math.random()*6.28,sc:0})}
     }
   }
-  
-  // FIX #5: WIN CONDITIONS - Only Knockout and Showdown end on "kill all"
-  // Gem Grab, Bounty, Hot Zone, Heist, Brawl Ball have timer/objective wins
   const redAliveCount=ENM.filter(e=>!e.dead&&(e.team===1||e.team===-1)).length;
   if(redAliveCount===0&&ENM.length>0&&T>2){
-    // Only these modes win by elimination:
-    if(MODE==="knockout"||MODE==="showdown"){
-      // Knockout/Showdown: Kill all = Win
+    if(MODE==="knockout"||MODE==="showdown"||MODE==="gems"||MODE==="bounty"||MODE==="hotzone"){
+      // Last red standing dead → Sieg!
       setTimeout(()=>endGame(true),800);
-    }
-    // Gem Grab: Won by countdown (handled in updateGemGrab)
-    // Bounty: Won by timer (handled below)
-    // Hot Zone: Won by 100% control (handled below)
-    // Heist: Won by safe destruction or timer
-    // Brawl Ball: Won by goals
-    else if(MODE!=="gems"&&MODE!=="knockout"&&MODE!=="bounty"&&MODE!=="hotzone"&&WAVE<WAVES.length-1){
+    } else if(MODE!=="gems"&&MODE!=="knockout"&&MODE!=="bounty"&&MODE!=="hotzone"&&WAVE<WAVES.length-1){
       WAVE++;annWave(WAVE+1);snd("wave");
       earnCoins(100,W/2,H/2-40,"🌊 +100");
       setTimeout(()=>WAVES[WAVE].map(fn=>fn()).forEach(e=>ENM.push(e)),1600);
@@ -3506,31 +3670,31 @@ function endGame(won){
   const newRank=getRank(SAVE.trophies);
   if(newRank>oldRank){window._rankUp=newRank;window._rankUpCol=getRankColor(newRank);}
   else{window._rankUp=0;}
-  
-  // FIX #3: REALISTIC REWARDS (April 2026)
-  // Brawl Pass XP: 15-25 for win, 8-12 for loss
-  const baseXP = MODE === "showdown" ? (won ? 22 : 10) : (won ? 18 : 10);
-  const killBonus = Math.min(KILLS, 5) * 2; // Max +10 XP from kills
-  const bpXP = baseXP + killBonus;
+  // Award Brawl Pass XP — balanced: ~10-15 matches per tier
+  const bpXP=won?(30+KILLS*3):(10+KILLS*1);
   addBrawlPassXP(bpXP);
-  
-  // Power Points: Much lower (Starr Drops are main source)
-  const ppGain = won ? (Math.floor(Math.random()*3)+2) : (Math.floor(Math.random()*2)+1); // 2-4 win, 1-2 loss
+  // Award power points for active brawler
+  const ppGain=won?(8+KILLS*2):(2+KILLS);
   const bkey=BD[SEL]?.key||'SHELLY';
   SAVE.powerPoints[bkey]=(SAVE.powerPoints[bkey]||0)+ppGain;
   window._ppGained=ppGain;
-  
-  // Award Starr Drop every 3 wins (unchanged - good system)
+  // Award Starr Drop every 3 wins, Chaos Drop every 10 wins
   if(won){
-    SAVE.totalWins++;
-    if(SAVE.totalWins%3===0){SAVE.starrDrops++;window._gotDrop=true}else{window._gotDrop=false}
+    SAVE.totalWins=(SAVE.totalWins||0)+1;
+    const tw=SAVE.totalWins;
+    if(tw%10===0){
+      // Chaos Drop milestone
+      SAVE.chaosDrops=(SAVE.chaosDrops||0)+1;
+      window._gotDrop=true;window._dropType="chaos";
+    } else if(tw%3===0){
+      SAVE.starrDrops=(SAVE.starrDrops||0)+1;
+      window._gotDrop=true;window._dropType="starr";
+    } else {
+      window._gotDrop=false;window._dropType=null;
+    }
   }
-  
-  // FIX #3: NO COIN REWARDS! (disabled in earnCoins function)
-  // Original: earnCoins(300,W/2,H/2-60,"🏆 +300");
-  // Coins only from Brawl Pass and Mastery system
-  
   if(won){
+    earnCoins(300,W/2,H/2-60,"🏆 +300");
     const gemsWon=3+KILLS;earnGems(gemsWon);
     setTimeout(()=>COIN_TOASTS.push({x:W/2,y:H/2-90,amount:gemsWon,label:`💎 +${gemsWon}`,life:2,maxL:2,vy:-40}),400);
     persist();
@@ -6667,37 +6831,88 @@ function drawBrawlPassTab(cY,cH){
   drawUpgradeScreen._bpRow2Y=row2Y+14;
 }
 function drawStarrDropTab(cY,cH){
-  const drops=SAVE.starrDrops;
-  // Big box visual
-  gl("#FF8800",20);
-  const boxY=cY+30,boxS=90;
-  const boxGr=X.createRadialGradient(W/2,boxY+boxS/2,10,W/2,boxY+boxS/2,boxS);
+  const drops=SAVE.starrDrops||0;
+  const chaos=SAVE.chaosDrops||0;
+
+  // ── Left side: Starr Drop ──
+  const lx=W/2-220,lw=195;
+  gl("#FF8800",16);
+  const boxY=cY+28,boxS=76;
+  const boxGr=X.createRadialGradient(lx+lw/2,boxY+boxS/2,8,lx+lw/2,boxY+boxS/2,boxS);
   boxGr.addColorStop(0,"#FFCC00");boxGr.addColorStop(.5,"#FF8800");boxGr.addColorStop(1,"#CC4400");
-  X.fillStyle=boxGr;rr(W/2-boxS/2,boxY,boxS,boxS,16);X.fill();
-  X.strokeStyle="#7A2800";X.lineWidth=4;rr(W/2-boxS/2,boxY,boxS,boxS,16);X.stroke();ng();
-  X.fillStyle="rgba(255,255,255,.3)";rr(W/2-boxS/2+6,boxY+6,boxS-12,boxS*.4,12);X.fill();
-  X.font='36px serif';X.textAlign="center";X.textBaseline="middle";X.fillText("📦",W/2,boxY+boxS/2+4);
-  // Drop count
+  X.fillStyle=boxGr;rr(lx+lw/2-boxS/2,boxY,boxS,boxS,14);X.fill();
+  X.strokeStyle="#7A2800";X.lineWidth=3;rr(lx+lw/2-boxS/2,boxY,boxS,boxS,14);X.stroke();ng();
+  X.fillStyle="rgba(255,255,255,.25)";rr(lx+lw/2-boxS/2+5,boxY+5,boxS-10,boxS*.38,10);X.fill();
+  X.font='30px serif';X.textAlign="center";X.textBaseline="middle";X.fillText("📦",lx+lw/2,boxY+boxS/2+2);
+  // Count
   const pulse=1+Math.sin(T*3)*.04;
-  X.save();X.translate(W/2,cY+145);X.scale(pulse,pulse);
-  gl("#FFD700",14);X.fillStyle="#FFD700";X.font='bold 32px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText(`x${drops}`,0,0);ng();X.restore();
-  X.fillStyle="rgba(200,190,255,.7)";X.font='bold 13px "Lilita One"';X.textAlign="center";X.textBaseline="middle";X.fillText("Starr Drops verfügbar",W/2,cY+176);
-  X.fillStyle="rgba(200,190,255,.5)";X.font='bold 10px "Lilita One"';
-  X.fillText("Enthält: Münzen, Gems, Power-Punkte, Gadgets oder Sternenkräfte",W/2,cY+196);
+  X.save();X.translate(lx+lw/2,cY+126);X.scale(pulse,pulse);
+  gl("#FFD700",12);X.fillStyle="#FFD700";X.font='bold 28px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText(`×${drops}`,0,0);ng();X.restore();
+  X.fillStyle="rgba(220,210,255,.75)";X.font='bold 12px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText("Starr Drops",lx+lw/2,cY+156);
+  X.fillStyle="rgba(180,170,230,.5)";X.font='bold 9px "Lilita One"';
+  X.fillText("Münzen · Gems · PP",lx+lw/2,cY+172);
+  X.fillText("Gadgets · Sternenkräfte",lx+lw/2,cY+184);
   // Open button
   const canOpen=drops>0;
-  const upY=cY+cH-60;
-  gl(canOpen?"#FF8000":"rgba(100,80,150,.5)",canOpen?22:5);
-  const ubg=X.createLinearGradient(W/2-110,upY,W/2-110,upY+44);
-  if(canOpen){ubg.addColorStop(0,"#FFCC00");ubg.addColorStop(.4,"#FF8C00");ubg.addColorStop(1,"#CC4400")}
+  const upY=cY+cH-62;
+  gl(canOpen?"#FF8000":"rgba(100,80,150,.5)",canOpen?20:4);
+  const ubg=X.createLinearGradient(lx,upY,lx,upY+42);
+  if(canOpen){ubg.addColorStop(0,"#FFCC00");ubg.addColorStop(.5,"#FF8C00");ubg.addColorStop(1,"#CC4400")}
   else{ubg.addColorStop(0,"rgba(60,50,100,.8)");ubg.addColorStop(1,"rgba(30,25,60,.8)")}
-  X.fillStyle=ubg;rr(W/2-110,upY,220,44,22);X.fill();
-  X.strokeStyle=canOpen?"#7A2800":"rgba(100,80,180,.4)";X.lineWidth=3;rr(W/2-110,upY,220,44,22);X.stroke();ng();
-  if(canOpen){X.fillStyle="rgba(255,255,255,.25)";rr(W/2-110,upY,220,22,22);X.fill()}
-  X.strokeStyle=canOpen?"rgba(0,0,0,.7)":"transparent";X.lineWidth=3;X.font='bold 16px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
-  X.strokeText(canOpen?"📦 DROP ÖFFNEN":"Keine Drops",W/2,upY+22);
-  X.fillStyle=canOpen?"#FFF":"rgba(150,140,180,.7)";X.fillText(canOpen?"📦 DROP ÖFFNEN":"Keine Drops",W/2,upY+22);
-  drawUpgradeScreen._openBtn={y:upY,canOpen};
+  X.fillStyle=ubg;rr(lx,upY,lw,42,21);X.fill();
+  X.strokeStyle=canOpen?"#7A2800":"rgba(100,80,180,.4)";X.lineWidth=2.5;rr(lx,upY,lw,42,21);X.stroke();ng();
+  if(canOpen){X.fillStyle="rgba(255,255,255,.22)";rr(lx,upY,lw,21,21);X.fill()}
+  X.strokeStyle=canOpen?"rgba(0,0,0,.75)":"transparent";X.lineWidth=3;X.font='bold 15px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.strokeText(canOpen?"📦 ÖFFNEN":"Keine Drops",lx+lw/2,upY+21);
+  X.fillStyle=canOpen?"#FFF":"rgba(150,140,180,.7)";X.fillText(canOpen?"📦 ÖFFNEN":"Keine Drops",lx+lw/2,upY+21);
+  drawUpgradeScreen._openBtn={y:upY,x:lx,w:lw,canOpen};
+
+  // ── Divider ──
+  X.strokeStyle="rgba(255,255,255,.1)";X.lineWidth=1;
+  X.beginPath();X.moveTo(W/2,cY+20);X.lineTo(W/2,cY+cH-20);X.stroke();
+
+  // ── Right side: Chaos Drop ──
+  const rx=W/2+25,rw=195;
+  const cboxY=cY+28,cboxS=76;
+  const chaosGr=X.createRadialGradient(rx+rw/2,cboxY+cboxS/2,8,rx+rw/2,cboxY+cboxS/2,cboxS);
+  chaosGr.addColorStop(0,"#FF8833");chaosGr.addColorStop(.5,"#CC2200");chaosGr.addColorStop(1,"#440000");
+  gl("#FF4400",18);
+  X.fillStyle=chaosGr;rr(rx+rw/2-cboxS/2,cboxY,cboxS,cboxS,14);X.fill();
+  X.strokeStyle="#FF6600";X.lineWidth=3;rr(rx+rw/2-cboxS/2,cboxY,cboxS,cboxS,14);X.stroke();ng();
+  // Inner chaos ring decoration
+  X.strokeStyle="rgba(255,150,50,.35)";X.lineWidth=1.5;
+  X.beginPath();X.arc(rx+rw/2,cboxY+cboxS/2,cboxS*.38,0,6.28);X.stroke();
+  X.fillStyle="rgba(255,100,0,.15)";rr(rx+rw/2-cboxS/2+5,cboxY+5,cboxS-10,cboxS*.38,10);X.fill();
+  X.font='30px serif';X.textAlign="center";X.textBaseline="middle";X.fillText("🌀",rx+rw/2,cboxY+cboxS/2+2);
+  // Chaos badge
+  gl("#FF3300",8);X.fillStyle="rgba(0,0,0,.7)";rr(rx+rw/2-36,cboxY-10,72,18,9);X.fill();
+  X.strokeStyle="#FF4400";X.lineWidth=1.5;rr(rx+rw/2-36,cboxY-10,72,18,9);X.stroke();ng();
+  X.fillStyle="#FF6622";X.font='bold 8px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText("⚡ CHAOS",rx+rw/2,cboxY-1);
+  // Count
+  X.save();X.translate(rx+rw/2,cY+126);X.scale(pulse,pulse);
+  gl("#FF6600",12);X.fillStyle="#FF8833";X.font='bold 28px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText(`×${chaos}`,0,0);ng();X.restore();
+  X.fillStyle="rgba(255,180,120,.8)";X.font='bold 12px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.fillText("Chaos Drops",rx+rw/2,cY+156);
+  X.fillStyle="rgba(255,150,80,.55)";X.font='bold 9px "Lilita One"';
+  X.fillText("Mehr Gems · Mehr PP",rx+rw/2,cY+172);
+  X.fillText("Garantiert Gadgets+",rx+rw/2,cY+184);
+  // Open Chaos button
+  const canOpenChaos=chaos>0;
+  gl(canOpenChaos?"#FF4400":"rgba(100,80,150,.5)",canOpenChaos?20:4);
+  const cbg=X.createLinearGradient(rx,upY,rx,upY+42);
+  if(canOpenChaos){cbg.addColorStop(0,"#FF6622");cbg.addColorStop(.5,"#CC2200");cbg.addColorStop(1,"#880000")}
+  else{cbg.addColorStop(0,"rgba(60,50,100,.8)");cbg.addColorStop(1,"rgba(30,25,60,.8)")}
+  X.fillStyle=cbg;rr(rx,upY,rw,42,21);X.fill();
+  X.strokeStyle=canOpenChaos?"#FF6622":"rgba(100,80,180,.4)";X.lineWidth=2.5;rr(rx,upY,rw,42,21);X.stroke();ng();
+  if(canOpenChaos){X.fillStyle="rgba(255,255,255,.18)";rr(rx,upY,rw,21,21);X.fill()}
+  X.strokeStyle=canOpenChaos?"rgba(0,0,0,.75)":"transparent";X.lineWidth=3;X.font='bold 15px "Lilita One"';X.textAlign="center";X.textBaseline="middle";
+  X.strokeText(canOpenChaos?"🌀 CHAOS ÖFFNEN":"Keine Chaos",rx+rw/2,upY+21);
+  X.fillStyle=canOpenChaos?"#FFD0A0":"rgba(150,140,180,.7)";X.fillText(canOpenChaos?"🌀 CHAOS ÖFFNEN":"Keine Chaos",rx+rw/2,upY+21);
+  drawUpgradeScreen._chaosBtn={y:upY,x:rx,w:rw,canOpen:canOpenChaos};
 }
 function handleUpgradeClick(x,y){
   const d=drawUpgradeScreen;
@@ -6758,8 +6973,16 @@ function handleUpgradeClick(x,y){
   if(UPGRADE_TAB===2&&d._spToggle&&Math.abs(x-W/2)<80&&y>d._spToggle.y&&y<d._spToggle.y+44){
     SAVE.activeStarPower[BD[SEL].key]=!SAVE.activeStarPower[BD[SEL].key];persist();snd("select");return;
   }
-  if(UPGRADE_TAB===4&&d._openBtn?.canOpen&&Math.abs(x-W/2)<110&&y>d._openBtn.y&&y<d._openBtn.y+44){
-    startStarrDropScreen("upgrade");return;
+  if(UPGRADE_TAB===4){
+    const ob=d._openBtn,cb=d._chaosBtn;
+    // Starr Drop button
+    if(ob?.canOpen&&x>=ob.x&&x<=ob.x+ob.w&&y>ob.y&&y<ob.y+42){
+      startStarrDropScreen("upgrade",false);return;
+    }
+    // Chaos Drop button
+    if(cb?.canOpen&&x>=cb.x&&x<=cb.x+cb.w&&y>cb.y&&y<cb.y+42){
+      startStarrDropScreen("upgrade",true);return;
+    }
   }
 }
 
@@ -6852,13 +7075,20 @@ function drawEnd(won){
     X.restore();
   }
 
-  // ── Starr Drop notification ──
+  // ── Drop notification (Starr or Chaos) ──
   if(window._gotDrop){
+    const isChaosWon=window._dropType==="chaos";
     const dpulse=1+Math.sin(T*4)*.05;
-    const dropY=window._rankUp?pany+246:pany+230;
+    const dropY=window._rankUp?pany+248:pany+232;
     X.save();X.translate(W/2,dropY);X.scale(dpulse,dpulse);
-    gl("#FF8800",16);X.fillStyle="#FF8800";X.font=`bold 14px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
-    X.fillText("📦 STARR DROP ERHALTEN!",0,0);ng();X.restore();
+    const dropCol=isChaosWon?"#FF6622":"#FF8800";
+    const dropTxt=isChaosWon?"🌀 CHAOS DROP ERHALTEN!":"📦 STARR DROP ERHALTEN!";
+    gl(dropCol,16);
+    X.fillStyle="rgba(0,0,0,.6)";rr(-130,-14,260,28,14);X.fill();
+    X.strokeStyle=dropCol;X.lineWidth=1.5;rr(-130,-14,260,28,14);X.stroke();ng();
+    gl(dropCol,10);X.fillStyle=dropCol;X.font=`bold 14px "Lilita One"`;X.textAlign="center";X.textBaseline="middle";
+    X.fillText(dropTxt,0,0);ng();
+    X.restore();
   }
 
   // ── Stat tiles (3 tiles) ──
