@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -147,6 +148,9 @@ const GADGETS={
   MR_P:   {name:"Porters Deployment",nameDE:"Porter-Einsatz",desc:"Spawnt sofort 2 Porter",icon:"🧳",cooldown:7},
   STU:    {name:"Nitro Boost",nameDE:"Nitro-Boost",desc:"Sofort +50% Geschwindigkeit für 2s",icon:"🏎",cooldown:5},
   BUZZ:   {name:"Reserve Buoy",nameDE:"Reserve-Boje",desc:"Setzt Schild für 1.5s, absorbiert 2000 Schaden",icon:"🛡",cooldown:8},
+  SIRIUS: {name:"Singularity Pulse",nameDE:"Singularitätspuls",desc:"Schiebt alle Gegner in 250px-Radius weg",icon:"🌀",cooldown:7},
+  GUENTER:{name:"Shadow Step",nameDE:"Schattensprung",desc:"Teleportiert sofort hinter nächsten Gegner",icon:"🐍",cooldown:5},
+  PAUL:   {name:"Shellstorm",nameDE:"Granaten-Sturm",desc:"Feuert 6 Streubomben in alle Richtungen",icon:"💥",cooldown:6},
 };
 const STAR_POWERS={
   SHELLY: {name:"Shell Shock",nameDE:"Schrot-Schock",desc:"Feinde durch Super werden verlangsamt",icon:"🐚"},
@@ -177,6 +181,9 @@ const STAR_POWERS={
   EDGAR:  {name:"Fisticuffs",nameDE:"Schlägerei",desc:"Schaden nehmen lädt Super auf; +50% Heilung pro Treffer",icon:"🥊"},
   STU:    {name:"Zero Drag",nameDE:"Null-Widerstand",desc:"Super lädt sich 50% schneller auf beim Treffen",icon:"🔥"},
   BUZZ:   {name:"Eyes Sharp",nameDE:"Scharfe Augen",desc:"Super-Reichweite in Büschen verdoppelt",icon:"👁"},
+  SIRIUS: {name:"Dark Gravity",nameDE:"Dunkelgravitation",desc:"Super-Zone verlangsamt Gegner dauerhaft um 40%",icon:"⚫"},
+  GUENTER:{name:"Neurotoxin",nameDE:"Neurotoxin",desc:"Gifttreffer reduzieren feindliche Heilung um 80%",icon:"☠"},
+  PAUL:   {name:"Overkill",nameDE:"Overkill",desc:"Tötet → sofort 1 Gratis-Super-Salve",icon:"🔴"},
 };
 // Gadget cooldowns state
 let GADGET_CD=0;
@@ -212,6 +219,9 @@ function applyGadget(){
   else if(key==="MR_P"){const a2=a;for(let i=0;i<2;i++){setTimeout(()=>{const mx=PL.x+Math.cos(a2+i*.4)*80,my=PL.y+Math.sin(a2+i*.4)*80;if(!blocked(mx,my)){const m=mkEnemy(mx,my,"COLT","agile",800,220);m.team=0;m.friendly=true;m._ttl=6;ENM.push(m);burst(mx,my,PL.color,PL.dark,10,.5)}},i*200)}}
   else if(key==="STU"){PL.spdBoost=2;PL.vx=Math.cos(a)*700;PL.vy=Math.sin(a)*700;burst(PL.x,PL.y,"#FF8833","#CC4400",16,.7);spawnDmg(PL.x,PL.y-30,"NITRO!","#FF8833")}
   else if(key==="BUZZ"){PL._shieldT=1.5;PL._shieldHp=2000;burst(PL.x,PL.y,"#00CCFF","#0066AA",16,.7);spawnDmg(PL.x,PL.y-30,"SHIELD!","#00CCFF")}
+  else if(key==="SIRIUS"){for(const e of ENM){if(e.dead)continue;const dx=e.x-PL.x,dy=e.y-PL.y,d=Math.hypot(dx,dy)||1;if(d<260){e.vx=(dx/d)*600;e.vy=(dy/d)*600;}}SHK=.35;burst(PL.x,PL.y,"#8833FF","#4400BB",22,1.0);spawnDmg(PL.x,PL.y-30,"PULSE!","#AA55FF")}
+  else if(key==="GUENTER"){let near=null,nd=9999;for(const e of ENM){if(e.dead)continue;const d=dst(e,PL);if(d<nd){nd=d;near=e;}}if(near){const ox=near.x-Math.cos(Math.atan2(near.y-PL.y,near.x-PL.x))*48,oy=near.y-Math.sin(Math.atan2(near.y-PL.y,near.x-PL.x))*48;if(!blocked(ox,oy)){PL.x=ox;PL.y=oy;}near._poisonT=3;near._poisonDmg=180;burst(PL.x,PL.y,"#33FFAA","#009955",14,.65);spawnDmg(PL.x,PL.y-30,"SHADOW!","#33FFAA")}}
+  else if(key==="PAUL"){for(let i=0;i<6;i++)fireBul(PL.x,PL.y,i/6*6.28,320,PL.dmg*0.8,PL.color,PL.dark,"player",10,1.5,2.0,true,true);SHK=.25;burst(PL.x,PL.y,"#FF4422","#AA1100",18,.85);spawnDmg(PL.x,PL.y-30,"STORM!","#FF6644")}
   else{PL.spdBoost=2;burst(PL.x,PL.y,PL.color,PL.dark,14,.6)}
   burst(PL.x,PL.y,PL.color,PL.dark,10,.4);
 }
@@ -1240,6 +1250,9 @@ const BRAWLER_CLASS={
   LOLA:    "damage_dealer", // offiziell: Damage Dealer
   STU:     "assassin",      // V10: Dash-Assassin
   BUZZ:    "tank",          // V10: Stun-Tank
+  SIRIUS:  "controller",   // V10: Kontrolle / Dark Matter
+  GUENTER: "assassin",     // V10: Gift-Assassin
+  PAUL:    "damage_dealer", // V10: Kettenshot Damage-Dealer
 };
 
 function getBrawlerClass(bd){
@@ -1990,9 +2003,13 @@ const BD=[
   // ── V10 NEW ──
   {key:"STU",    name:"Stu",      rarity:"MYTHIC",         color:"#FF8833",dark:"#CC4400",body:"#EE6611", hp:4000,spd:245,ammoMax:2,ammoR:1.0,sCool:.55,wType:"rocket",  dmg:900, rLife:1.8, desc:"Drifting racer with dodge mechanics",  sHp:2,sSp:5,sDm:3,sRg:3, superDesc:"Dash + flames trail"},
   {key:"BUZZ",   name:"Buzz",     rarity:"EPIC",           color:"#00CCFF",dark:"#0066AA",body:"#0099DD", hp:6000,spd:195,ammoMax:3,ammoR:1.6,sCool:.80,wType:"hammer",  dmg:1000,rLife:1.1, desc:"Stuns enemies with sonar rings",        sHp:4,sSp:3,sDm:4,sRg:2, superDesc:"Hyper stun lunge leap"},
+  // ── V10 NEUE BRAWLER ──
+  {key:"SIRIUS", name:"Sirius",   rarity:"ULTRA_LEGENDARY",color:"#8833FF",dark:"#4400BB",body:"#6611EE", hp:4200,spd:210,ammoMax:3,ammoR:1.4,sCool:.65,wType:"rifle",   dmg:700, rLife:2.0, desc:"Kontrolliert dunkle Materie & Felder", sHp:3,sSp:3,sDm:3,sRg:4, superDesc:"Schwarzes Loch saugt alle an"},
+  {key:"GUENTER",name:"Günter",   rarity:"SUPER_RARE",     color:"#33FFAA",dark:"#009955",body:"#11DD88", hp:3200,spd:265,ammoMax:5,ammoR:0.3, sCool:.45,wType:"blades",  dmg:720, rLife:0.45,desc:"Blitzschneller Assassine mit Gift",     sHp:2,sSp:5,sDm:4,sRg:1, superDesc:"Giftiger Schattensprung + Biss"},
+  {key:"PAUL",   name:"Paul",     rarity:"ULTRA_LEGENDARY",color:"#FF4422",dark:"#AA1100",body:"#EE2200", hp:5000,spd:205,ammoMax:8,ammoR:2.0, sCool:.60,wType:"shotgun",  dmg:1400,rLife:2.2, desc:"Massiver Damage-Dealer mit Kettenshot",  sHp:4,sSp:3,sDm:5,sRg:3, superDesc:"Inferno-Rampage: 3× Shotgun-Salve"},
 ];
-// Sort by rarity: COMMON → RARE → SUPER_RARE → EPIC → MYTHIC → LEGENDARY
-const _RARITY_RANK={COMMON:0,RARE:1,SUPER_RARE:2,EPIC:3,MYTHIC:4,LEGENDARY:5};
+// Sort: COMMON→RARE→SUPER_RARE→EPIC→MYTHIC→LEGENDARY→ULTRA_LEGENDARY
+const _RARITY_RANK={COMMON:0,RARE:1,SUPER_RARE:2,EPIC:3,MYTHIC:4,LEGENDARY:5,ULTRA_LEGENDARY:6};
 BD.sort((a,b)=>(_RARITY_RANK[a.rarity]||0)-(_RARITY_RANK[b.rarity]||0));
 let SEL=0;
 
@@ -3352,6 +3369,13 @@ function updateEnemies(){
     }
     // ── Stun ──
     if(e._stunT>0){e._stunT-=DT;e.vx*=.5;e.vy*=.5;e.flashT=.05;continue}
+    // ── Günter Gift-Schaden ──
+    if(e._poisonT>0){
+      e._poisonT-=DT;
+      e.hp-=(e._poisonDmg||120)*DT;
+      e.flashT=.05;
+      if(Math.random()<DT*4)spawnDmg(e.x,e.y-20-Math.random()*20,`☠ ${Math.round((e._poisonDmg||120))}`,  "#33FFAA");
+    }
     // ── Slow ──
     const slowMult=(e._slowT>0)?(e._slowT-=DT,.4):1;
     if(e.invT>0)e.invT-=DT;if(e.flashT>0)e.flashT-=DT;
@@ -7508,6 +7532,9 @@ const BRAWLER_IMG_URLS={
   COLETTE: "https://static.wikia.nocookie.net/brawlstars/images/e/e8/Colette_Portrait.png/revision/latest/scale-to-width-down/120?cb=20251014140548",
   EDGAR:   "https://static.wikia.nocookie.net/brawlstars/images/b/b4/Edgar_Portrait.png/revision/latest/scale-to-width-down/120?cb=20251019203943",
   LOLA:    "https://static.wikia.nocookie.net/brawlstars/images/9/9f/Lola_Portrait.png/revision/latest/scale-to-width-down/120?cb=20211027003449",
+  // Sirius: echtes Brawl Stars Wikia Portrait
+  SIRIUS:  "https://static.wikia.nocookie.net/brawlstars/images/3/3f/Sirius_Portrait.png/revision/latest/scale-to-width-down/120?cb=20241107185709",
+  // Günter & Paul: eigene Chars → Canvas-Portrait (kein URL)
 };
 const BRAWLER_IMGS={}; // key → Image object (loaded or loading)
 let IMGS_LOADED=0,IMGS_TOTAL=0;
